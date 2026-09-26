@@ -1,0 +1,74 @@
+{% extends 'base.html' %}
+{% load custom_filters %}
+
+{% block content %}
+<div class="max-w-6xl mx-auto">
+    <div class="mb-8">
+        <a href="{% url 'home' %}" 
+           class="inline-flex items-center text-indigo-600 hover:text-indigo-800 font-medium transition-colors">
+            ← Orqaga
+        </a>
+    </div>
+    
+    <div class="bg-white rounded-2xl shadow-xl overflow-hidden">
+        <!-- Header -->
+        <div class="bg-gradient-to-r from-blue-600 to-indigo-700 px-8 py-6">
+            <h1 class="text-3xl font-bold text-white">
+                📖 {{ group_name }} Guruh Jadvali
+            </h1>
+        </div>
+        
+        <!-- Schedule -->
+        <div class="p-8">
+            {% for day_num, day_name in day_names.items %}
+            {% if schedule_by_day|get_item:day_num %}
+            <div class="mb-8 {% if day_num == today %}ring-2 ring-green-400 rounded-xl p-6 bg-green-50{% else %}p-6{% endif}">
+                <div class="flex items-center mb-4">
+                    <div class="text-2xl mr-3">
+                        {% if day_num == today %}📅{% else %}📆{% endif %}
+                    </div>
+                    <h2 class="text-2xl font-bold text-gray-800">
+                        {{ day_name }}
+                        {% if day_num == today %}
+                        <span class="ml-2 text-sm bg-green-500 text-white px-3 py-1 rounded-full">Bugun</span>
+                        {% endif %}
+                    </h2>
+                </div>
+                
+                {% for slot in schedule_by_day|get_item:day_num %}
+                <div class="bg-gray-50 rounded-lg p-4 mb-3 border-l-4 {% if slot.lesson_type == 'lecture' %}border-blue-500{% else %}border-purple-500{% endif} hover:shadow-md transition-shadow">
+                    <div class="flex flex-col md:flex-row md:items-center justify-between">
+                        <div class="flex items-center mb-2 md:mb-0">
+                            <span class="text-2xl font-bold text-indigo-600 mr-4">{{ slot.pair_number }}-para</span>
+                            <span class="text-lg font-semibold text-gray-700">{{ slot.subject.name }}</span>
+                        </div>
+                        <div class="flex items-center space-x-4 text-sm text-gray-600">
+                            <span class="flex items-center">
+                                <span class="mr-1">🎓</span>
+                                <span class="px-2 py-1 rounded {% if slot.lesson_type == 'lecture' %}bg-blue-100 text-blue-800{% else %}bg-purple-100 text-purple-800{% endif}">
+                                    {% if slot.lesson_type == 'lecture' %}Ma'ruza{% else %}Seminar{% endif %}
+                                </span>
+                            </span>
+                            <span class="flex items-center">
+                                <span class="mr-1">👨‍🏫</span>
+                                {{ slot.teacher.full_name }}
+                            </span>
+                            <span class="flex items-center">
+                                <span class="mr-1">🚪</span>
+                                {{ slot.room.name }}
+                            </span>
+                        </div>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+            {% endif %}
+            {% endfor %}
+        </div>
+    </div>
+    
+    <div class="mt-8 text-center text-gray-500 text-sm">
+        <p>© 2026 Smart Timetable. Barcha huquqlar himoyalangan.</p>
+    </div>
+</div>
+{% endblock %}

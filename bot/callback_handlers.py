@@ -1,4 +1,5 @@
-from aiogram import Router, types, F, CallbackQuery
+from aiogram import Router, types, F
+from aiogram.types import CallbackQuery
 from aiogram.fsm.context import FSMContext
 from asgiref.sync import sync_to_async
 from timetable.models import Teacher, Subject, Room, TimetableSlot, CoursePlan, SystemSettings

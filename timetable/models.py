@@ -71,7 +71,7 @@ class Teacher(models.Model):
 
 class Subject(models.Model):
     name = models.CharField(max_length=200, verbose_name='Fan nomi')
-    code = models.CharField(max_length=20, unique=True, verbose_name='Fan kodi')
+    code = models.CharField(max_length=50, unique=True, verbose_name='Fan kodi')
 
     class Meta:
         verbose_name = 'Fan'

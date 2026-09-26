@@ -26,7 +26,8 @@ def get_admin_keyboard():
         [KeyboardButton(text="🚪 Auditoriya qo'shish")],
         [KeyboardButton(text="📝 O'quv rejasi qo'shish")],
         [KeyboardButton(text="⚙️ Tizim sozlamalari")],
-        [KeyboardButton(text="🔄 Jadvalni yangilash")],
+        [KeyboardButton(text="� Guruh jadvalini yuklab olish")],
+        [KeyboardButton(text="�🔄 Jadvalni yangilash")],
         [KeyboardButton(text="📅 Bugungi dars jadvalim")],
         [KeyboardButton(text="📊 Haftalik jadval")],
     ]

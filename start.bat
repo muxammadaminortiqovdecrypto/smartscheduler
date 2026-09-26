@@ -22,5 +22,9 @@ if %errorlevel% neq 0 (
 echo Jadval generatsiyasi muvaffaqiyatli tugadi!
 echo.
 
-echo 3. Telegram bot ishga tushmoqda...
+echo 3. Web server ishga tushmoqda...
+start cmd /k python manage.py runserver
+echo.
+
+echo 4. Telegram bot ishga tushmoqda...
 python bot/main.py

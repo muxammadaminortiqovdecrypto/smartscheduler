@@ -84,10 +84,19 @@ def group_schedule_view(request, group_name):
     for slot in slots:
         schedule_by_day[slot.day_of_week].append(slot)
     
+    # Template uchun ma'lumotlarni tayyorlash
+    schedule_data = []
+    for day_num in range(1, 7):
+        if schedule_by_day[day_num]:
+            schedule_data.append({
+                'day_num': day_num,
+                'day_name': day_names.get(day_num, str(day_num)),
+                'slots': schedule_by_day[day_num]
+            })
+    
     context = {
         'group_name': matching_group,  # Asl nomini ko'rsatish
-        'schedule_by_day': schedule_by_day,
-        'day_names': day_names,
+        'schedule_data': schedule_data,
         'today': day_of_week,
     }
     

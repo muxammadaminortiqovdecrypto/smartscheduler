@@ -1,5 +1,5 @@
 {% extends 'base.html' %}
-{% load custom_filters %}
+{% load timetable_templatetags %}
 
 {% block content %}
 <div class="max-w-6xl mx-auto">
@@ -31,22 +31,21 @@
         
         <!-- Schedule -->
         <div class="p-8">
-            {% for day_num, day_name in day_names.items %}
-            {% if schedule_by_day|get_item:day_num %}
-            <div class="mb-8 {% if day_num == today %}ring-2 ring-green-400 rounded-xl p-6 bg-green-50{% else %}p-6{% endif}">
+            {% for day_schedule in schedule_data %}
+            <div class="mb-8 {% if day_schedule.day_num == today %}ring-2 ring-green-400 rounded-xl p-6 bg-green-50{% else %}p-6{% endif}">
                 <div class="flex items-center mb-4">
                     <div class="text-2xl mr-3">
-                        {% if day_num == today %}📅{% else %}📆{% endif %}
+                        {% if day_schedule.day_num == today %}📅{% else %}📆{% endif %}
                     </div>
                     <h2 class="text-2xl font-bold text-gray-800">
-                        {{ day_name }}
-                        {% if day_num == today %}
+                        {{ day_schedule.day_name }}
+                        {% if day_schedule.day_num == today %}
                         <span class="ml-2 text-sm bg-green-500 text-white px-3 py-1 rounded-full">Bugun</span>
                         {% endif %}
                     </h2>
                 </div>
                 
-                {% for slot in schedule_by_day|get_item:day_num %}
+                {% for slot in day_schedule.slots %}
                 <div class="bg-gray-50 rounded-lg p-4 mb-3 border-l-4 {% if slot.lesson_type == 'lecture' %}border-blue-500{% else %}border-purple-500{% endif} hover:shadow-md transition-shadow">
                     <div class="flex flex-col md:flex-row md:items-center justify-between">
                         <div class="flex items-center mb-2 md:mb-0">
@@ -73,13 +72,12 @@
                 </div>
                 {% endfor %}
             </div>
-            {% endif %}
             {% endfor %}
         </div>
     </div>
     
     <div class="mt-8 text-center text-gray-500 text-sm">
-        <p>© 2026 Smart Timetable. Barcha huquqlar himoyalangan.</p>
+        <p> 2026 Smart Timetable. Barcha huquqlar himoyalangan.</p>
     </div>
 </div>
 {% endblock %}

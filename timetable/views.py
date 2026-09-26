@@ -22,7 +22,7 @@ def schedule_view(request):
     context = {
         'groups': sorted(groups),
     }
-    return render(request, 'schedule.html', context)
+    return render(request, 'index.html', context)
 
 
 def group_schedule_view(request, group_name):

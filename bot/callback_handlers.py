@@ -5,6 +5,7 @@ from asgiref.sync import sync_to_async
 from timetable.models import Teacher, Subject, Room, TimetableSlot, CoursePlan, SystemSettings
 from .keyboards import (
     get_admin_inline_keyboard,
+    get_resources_inline_keyboard,
     get_teacher_list_inline_keyboard,
     get_subject_list_inline_keyboard,
     get_room_list_inline_keyboard,
@@ -15,6 +16,16 @@ import datetime
 router = Router()
 
 SUPERADMIN_ID = 1685342390
+
+
+@router.callback_query(F.data == "admin_resources")
+async def callback_admin_resources(callback: types.CallbackQuery):
+    """Resurslar menusi"""
+    await callback.message.edit_text(
+        "📚 Resurslar boshqaruvi",
+        reply_markup=get_resources_inline_keyboard()
+    )
+    await callback.answer()
 
 
 @router.callback_query(F.data == "admin_teacher")

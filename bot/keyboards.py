@@ -53,25 +53,46 @@ def get_remove_keyboard():
 
 
 def get_admin_inline_keyboard():
-    """Admin inline klaviaturasi"""
+    """Admin inline klaviaturasi - tizimli tartib"""
     buttons = [
         [
-            InlineKeyboardButton(text="👨‍🏫 O'qituvchi", callback_data="admin_teacher"),
-            InlineKeyboardButton(text="📚 Fan", callback_data="admin_subject"),
+            InlineKeyboardButton(text="📚 Resurslar", callback_data="admin_resources"),
         ],
         [
-            InlineKeyboardButton(text="🚪 Auditoriya", callback_data="admin_room"),
-            InlineKeyboardButton(text="👥 Guruh", callback_data="admin_group"),
+            InlineKeyboardButton(text="👨‍🏫 O'qituvchilar", callback_data="admin_teacher"),
+            InlineKeyboardButton(text="📚 Fanlar", callback_data="admin_subject"),
         ],
         [
-            InlineKeyboardButton(text="📝 O'quv rejasi", callback_data="admin_course"),
+            InlineKeyboardButton(text="🚪 Auditoriyalar", callback_data="admin_room"),
+            InlineKeyboardButton(text="👥 Guruhlar", callback_data="admin_group"),
+        ],
+        [
+            InlineKeyboardButton(text="📝 O'quv rejalari", callback_data="admin_course"),
         ],
         [
             InlineKeyboardButton(text="⚙️ Tizim sozlamalari", callback_data="admin_settings"),
-            InlineKeyboardButton(text="🔄 Jadval yangilash", callback_data="admin_regenerate"),
         ],
         [
+            InlineKeyboardButton(text="🔄 Jadval yangilash", callback_data="admin_regenerate"),
             InlineKeyboardButton(text="📥 Jadval yuklab olish", callback_data="admin_export"),
+        ],
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+def get_resources_inline_keyboard():
+    """Resurslar inline klaviaturasi"""
+    buttons = [
+        [
+            InlineKeyboardButton(text="�‍🏫 O'qituvchilar", callback_data="admin_teacher"),
+            InlineKeyboardButton(text="📚 Fanlar", callback_data="admin_subject"),
+        ],
+        [
+            InlineKeyboardButton(text="🚪 Auditoriyalar", callback_data="admin_room"),
+            InlineKeyboardButton(text="👥 Guruhlar", callback_data="admin_group"),
+        ],
+        [
+            InlineKeyboardButton(text="🔙 Orqaga", callback_data="admin_back"),
         ],
     ]
     return InlineKeyboardMarkup(inline_keyboard=buttons)

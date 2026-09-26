@@ -121,11 +121,11 @@ def export_schedule_csv(group_name, slots):
     day_names = {1: 'Dushanba', 2: 'Seshanba', 3: 'Chorshanba', 4: 'Payshanba', 5: 'Juma', 6: 'Shanba'}
     
     for slot in slots:
-        day_name = day_names.get(slot.day_of_week, slot.day_of_week)
+        day_name = day_names.get(slot.day_of_week, str(slot.day_of_week))
         lesson_type_uz = "Ma'ruza" if slot.lesson_type == 'lecture' else "Seminar"
         writer.writerow([
             day_name,
-            f"{slot.pair_number}-para",
+            f"{slot.pair_number}",
             slot.subject.name,
             lesson_type_uz,
             slot.teacher.full_name,

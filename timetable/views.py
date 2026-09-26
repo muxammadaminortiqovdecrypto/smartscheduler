@@ -32,8 +32,19 @@ def schedule_view(request):
 
 def group_schedule_view(request, group_name):
     """Guruh jadvali"""
-    # Guruh mavjudligini tekshirish
-    if not TimetableSlot.objects.filter(group_name=group_name).exists():
+    # Guruh nomini case-insensitive qilish
+    group_name_lower = group_name.lower()
+    
+    # Barcha guruhlarni olish va case-insensitive qidirish
+    all_groups = TimetableSlot.objects.values_list('group_name', flat=True).distinct()
+    matching_group = None
+    
+    for g in all_groups:
+        if g.lower() == group_name_lower:
+            matching_group = g
+            break
+    
+    if not matching_group:
         raise Http404(f"'{group_name}' guruh topilmadi.")
     
     # Tizim sozlamalaridan ruxsat etilgan guruhlarni olish
@@ -42,9 +53,11 @@ def group_schedule_view(request, group_name):
     if settings_obj:
         allowed_groups = settings_obj.get_allowed_groups()
     
-    # Ruxsat tekshirish
-    if allowed_groups and group_name not in allowed_groups:
-        raise Http404(f"'{group_name}' guruhiga ruxsat yo'q.")
+    # Ruxsat tekshirish (case-insensitive)
+    if allowed_groups:
+        allowed_lower = [g.lower() for g in allowed_groups]
+        if group_name_lower not in allowed_lower:
+            raise Http404(f"'{group_name}' guruhiga ruxsat yo'q.")
     
     # Bugungi kunni aniqlash
     today = datetime.date.today()
@@ -60,8 +73,8 @@ def group_schedule_view(request, group_name):
         6: 'Shanba',
     }
     
-    # Barcha darslarni olish
-    slots = TimetableSlot.objects.filter(group_name=group_name).order_by('day_of_week', 'pair_number')
+    # Barcha darslarni olish (matching_group asl nomi bilan)
+    slots = TimetableSlot.objects.filter(group_name=matching_group).order_by('day_of_week', 'pair_number')
     
     # Kunlarga bo'lish
     schedule_by_day = {}
@@ -72,7 +85,7 @@ def group_schedule_view(request, group_name):
         schedule_by_day[slot.day_of_week].append(slot)
     
     context = {
-        'group_name': group_name,
+        'group_name': matching_group,  # Asl nomini ko'rsatish
         'schedule_by_day': schedule_by_day,
         'day_names': day_names,
         'today': day_of_week,
@@ -81,9 +94,9 @@ def group_schedule_view(request, group_name):
     # Export formatini tekshirish
     export_format = request.GET.get('format', None)
     if export_format == 'csv':
-        return export_schedule_csv(group_name, slots)
+        return export_schedule_csv(matching_group, slots)
     elif export_format == 'pdf':
-        return export_schedule_pdf(group_name, slots, day_names)
+        return export_schedule_pdf(matching_group, slots, day_names)
     
     return render(request, 'group_schedule.html', context)
 

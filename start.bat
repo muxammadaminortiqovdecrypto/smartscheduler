@@ -23,8 +23,13 @@ echo Jadval generatsiyasi muvaffaqiyatli tugadi!
 echo.
 
 echo 3. Web server ishga tushmoqda...
-start cmd /k python manage.py runserver
+start "Django Web Server" cmd /c "python manage.py runserver && exit"
 echo.
 
 echo 4. Telegram bot ishga tushmoqda...
 python bot/main.py
+
+echo.
+echo Bot to'xtatildi.
+echo Web server oynasini yopish uchun X tugmasini bosing.
+

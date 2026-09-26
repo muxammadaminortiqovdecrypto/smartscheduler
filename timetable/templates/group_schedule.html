@@ -3,11 +3,22 @@
 
 {% block content %}
 <div class="max-w-6xl mx-auto">
-    <div class="mb-8">
+    <div class="mb-8 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <a href="{% url 'home' %}" 
            class="inline-flex items-center text-indigo-600 hover:text-indigo-800 font-medium transition-colors">
             ← Orqaga
         </a>
+        
+        <div class="flex gap-3">
+            <a href="{% url 'group_schedule' group_name %}?format=csv" 
+               class="inline-flex items-center px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors">
+                📄 CSV
+            </a>
+            <a href="{% url 'group_schedule' group_name %}?format=pdf" 
+               class="inline-flex items-center px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors">
+                📄 PDF
+            </a>
+        </div>
     </div>
     
     <div class="bg-white rounded-2xl shadow-xl overflow-hidden">

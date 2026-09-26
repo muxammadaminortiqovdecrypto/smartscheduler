@@ -220,8 +220,8 @@ async def callback_admin_regenerate(callback: types.CallbackQuery):
 
 
 @router.callback_query(F.data == "admin_export")
-async def callback_admin_export(callback: types.CallbackQuery, state: FSMContext):
-    """Guruh jadvalini yuklab olish"""
+async def callback_admin_export(callback: types.CallbackQuery):
+    """Guruh jadvalini yuklab olish - web link yuborish"""
     groups = await sync_to_async(
         lambda: list(TimetableSlot.objects.values_list('group_name', flat=True).distinct())
     )()
@@ -231,12 +231,20 @@ async def callback_admin_export(callback: types.CallbackQuery, state: FSMContext
         return
     
     group_list = "\n".join([f"{i+1}. {group}" for i, group in enumerate(groups)])
-    await callback.message.edit_text(
+    
+    web_url = "http://127.0.0.1:8000"  # Localhost URL
+    
+    text = (
         f"📥 Guruh jadvalini yuklab olish\n\n"
         f"Mavjud guruhlar:\n{group_list}\n\n"
-        f"Iltimos, guruh nomini kiriting:"
+        f"Web sahifada yuklab olish uchun:\n"
+        f"{web_url}/schedule/[GURUH_NOMI]/?format=csv\n"
+        f"{web_url}/schedule/[GURUH_NOMI]/?format=pdf\n\n"
+        f"Masalan:\n"
+        f"{web_url}/schedule/KI-210/?format=csv"
     )
-    await state.set_state("export_group_name")
+    
+    await callback.message.edit_text(text)
     await callback.answer()
 
 

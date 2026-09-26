@@ -6,12 +6,6 @@ from django.conf import settings
 from timetable.models import Teacher, TimetableSlot, Subject, Room, CoursePlan, SystemSettings
 from .keyboards import get_phone_keyboard, get_main_keyboard, get_remove_keyboard, get_admin_keyboard, get_degree_keyboard
 import datetime
-import csv
-import io
-from reportlab.lib.pagesizes import letter
-from reportlab.lib import colors
-from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph
-from reportlab.lib.styles import getSampleStyleSheet
 
 
 router = Router()
@@ -46,9 +40,6 @@ class AdminStates(StatesGroup):
     
     # System settings
     settings_hours_per_stavka = State('settings_hours_per_stavka')
-    
-    # Group schedule export
-    export_group_name = State('export_group_name')
 
 
 SUPERADMIN_ID = 1685342390
@@ -725,126 +716,14 @@ async def process_settings_hours(message: types.Message, state: FSMContext):
         await message.answer("❌ Iltimos, raqam kiriting:")
 
 
-@router.message(F.text == "📥 Guruh jadvalini yuklab olish")
-async def cmd_export_group_schedule(message: types.Message, state: FSMContext):
-    """Guruh jadvalini yuklab olish"""
-    if not await check_admin(message):
-        await message.answer("❌ Sizda bu amalni bajarish uchun huquq yo'q.")
-        return
-    
-    await state.clear()
-    
-    # Mavjud guruhlarni olish
-    groups = await sync_to_async(
-        lambda: list(TimetableSlot.objects.values_list('group_name', flat=True).distinct())
-    )()
-    
-    if not groups:
-        await message.answer("❌ Jadvalda guruhlar topilmadi. Avval jadval generatsiya qiling.")
-        return
-    
-    group_list = "\n".join([f"{i+1}. {group}" for i, group in enumerate(groups)])
-    await message.answer(
-        f"📥 Guruh jadvalini yuklab olish\n\n"
-        f"Mavjud guruhlar:\n{group_list}\n\n"
-        f"Iltimos, guruh nomini kiriting:"
-    )
-    await state.set_state(AdminStates.export_group_name)
-
-
-@router.message(AdminStates.export_group_name)
-async def process_export_group(message: types.Message, state: FSMContext):
-    """Guruh jadvalini export qilish"""
-    group_name = message.text
-    
-    # Guruh jadvalini olish
-    slots = await sync_to_async(
-        lambda: list(TimetableSlot.objects.filter(group_name=group_name).order_by('day_of_week', 'pair_number'))
-    )()
-    
-    if not slots:
-        await message.answer(f"❌ '{group_name}' guruh uchun jadval topilmadi.")
-        await state.clear()
-        return
-    
-    # CSV yaratish
-    csv_content = io.StringIO()
-    csv_writer = csv.writer(csv_content)
-    
-    # Header
-    csv_writer.writerow(['Kun', 'Para', 'Fan', 'Dars turi', 'O\'qituvchi', 'Auditoriya'])
-    
-    # Ma'lumotlar
-    for slot in slots:
-        day_name = _get_day_name(slot.day_of_week)
-        lesson_type_uz = "Ma'ruza" if slot.lesson_type == 'lecture' else "Seminar"
-        csv_writer.writerow([
-            day_name,
-            f"{slot.pair_number}-para",
-            slot.subject.name,
-            lesson_type_uz,
-            slot.teacher.full_name,
-            slot.room.name
-        ])
-    
-    csv_bytes = csv_content.getvalue().encode('utf-8-sig')  # UTF-8 with BOM for Excel compatibility
-    
-    # CSV yuborish
-    await message.answer_document(
-        types.BufferedInputFile(
-            csv_bytes,
-            filename=f"{group_name}_jadval.csv"
-        ),
-        caption=f"📄 {group_name} guruh jadvali (CSV)"
-    )
-    
-    # PDF yaratish
-    try:
-        pdf_buffer = io.BytesIO()
-        doc = SimpleDocTemplate(pdf_buffer, pagesize=letter)
-        
-        # Jadval ma'lumotlari
-        data = [['Kun', 'Para', 'Fan', 'Dars turi', 'O\'qituvchi', 'Auditoriya']]
-        
-        for slot in slots:
-            day_name = _get_day_name(slot.day_of_week)
-            lesson_type_uz = "Ma'ruza" if slot.lesson_type == 'lecture' else "Seminar"
-            data.append([
-                day_name,
-                f"{slot.pair_number}",
-                slot.subject.name,
-                lesson_type_uz,
-                slot.teacher.full_name,
-                slot.room.name
-            ])
-        
-        # Jadval yaratish
-        table = Table(data, colWidths=[80, 50, 120, 80, 120, 80])
-        table.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
-            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-            ('FONTSIZE', (0, 0), (-1, 0), 10),
-            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-            ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
-            ('GRID', (0, 0), (-1, -1), 1, colors.black),
-            ('FONTSIZE', (0, 1), (-1, -1), 9),
-        ]))
-        
-        doc.build([table])
-        pdf_buffer.seek(0)
-        
-        # PDF yuborish
-        await message.answer_document(
-            types.BufferedInputFile(
-                pdf_buffer.getvalue(),
-                filename=f"{group_name}_jadval.pdf"
-            ),
-            caption=f"📄 {group_name} guruh jadvali (PDF)"
-        )
-    except Exception as e:
-        await message.answer(f"⚠️ PDF yaratishda xatolik: {str(e)}")
-    
-    await message.answer("✅ Jadval muvaffaqiyatli yuborildi!", reply_markup=get_admin_keyboard())
-    await state.clear()
+def _get_day_name(day_of_week):
+    """Kun nomini qaytarish"""
+    day_names = {
+        1: 'Dushanba',
+        2: 'Seshanba',
+        3: 'Chorshanba',
+        4: 'Payshanba',
+        5: 'Juma',
+        6: 'Shanba',
+    }
+    return day_names.get(day_of_week, str(day_of_week))

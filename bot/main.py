@@ -20,7 +20,8 @@ os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'smartscheduler.settings')
 import django
 django.setup()
 
-from bot.handlers import router
+from bot.handlers import router as handlers_router
+from bot.callback_handlers import router as callback_router
 
 # Logging sozlamalari
 logging.basicConfig(level=logging.INFO, stream=sys.stdout)
@@ -44,8 +45,9 @@ async def main():
     # Dispatcher yaratish
     dp = Dispatcher()
     
-    # Router ulash
-    dp.include_router(router)
+    # Routers ulash
+    dp.include_router(handlers_router)
+    dp.include_router(callback_router)
     
     # Botni ishga tushirish
     print("🤖 Bot ishga tushmoqda...")

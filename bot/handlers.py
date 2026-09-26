@@ -582,9 +582,9 @@ async def cmd_regenerate_schedule(message: types.Message):
         await message.answer(f"❌ Xatolik: {str(e)}")
 
 
-@router.message(F.text == "⚙️ Tizim sozlamalari")
-async def cmd_system_settings(message: types.Message, state: FSMContext):
-    """Tizim sozlamalarini ko'rsatish va o'zgartirish"""
+@router.message(F.text == "/settings")
+async def cmd_settings(message: types.Message, state: FSMContext):
+    """Tizim sozlamalarini o'zgartirish"""
     user_id = message.from_user.id
     
     # Faqat superadmin
@@ -592,24 +592,108 @@ async def cmd_system_settings(message: types.Message, state: FSMContext):
         await message.answer("❌ Bu amalni faqat superadmin bajarishi mumkin.")
         return
     
+    await state.clear()
+    
     # Hozirgi sozlamalarni olish
     settings_obj = await sync_to_async(SystemSettings.objects.first)()
     
     if settings_obj:
+        allowed_groups = settings_obj.get_allowed_groups()
+        groups_text = ", ".join(allowed_groups) if allowed_groups else "Yo'q"
+        
         await message.answer(
             f"⚙️ Tizim sozlamalari\n\n"
-            f"📊 1 stavka = {settings_obj.hours_per_stavka} soat/hafta\n\n"
-            f"O'zgartirish uchun yangi qiymatni kiriting:",
+            f"📊 1 stavka = {settings_obj.hours_per_stavka} soat/hafta\n"
+            f"👥 Ruxsat etilgan guruhlar: {groups_text}\n\n"
+            f"O'zgartirish uchun:\n"
+            f"/stavka [soat] - 1 stavkada soatlar soni\n"
+            f"/group_add [nomi] - Guruh qo'shish\n"
+            f"/group_remove [nomi] - Guruh o'chirish",
             reply_markup=get_remove_keyboard()
         )
     else:
         await message.answer(
             "⚙️ Tizim sozlamalari\n\n"
-            "Hozircha sozlamalar yo'q. 1 stavkada nechi soat bo'lishini kiriting:",
+            "Hozircha sozlamalar yo'q. 1 stavkada nechi soat bo'lishini kiriting:\n"
+            "/stavka [soat]",
             reply_markup=get_remove_keyboard()
         )
     
     await state.set_state(AdminStates.settings_hours_per_stavka)
+
+
+@router.message(F.text.startswith("/stavka"))
+async def cmd_set_stavka(message: types.Message):
+    """Stavka soatlarini o'zgartirish"""
+    user_id = message.from_user.id
+    
+    if user_id != SUPERADMIN_ID:
+        await message.answer("❌ Faqat superadmin.")
+        return
+    
+    try:
+        hours = int(message.text.split()[1])
+        
+        if hours < 1 or hours > 40:
+            await message.answer("❌ Soatlar soni 1 dan 40 gacha bo'lishi kerak.")
+            return
+        
+        settings_obj = await sync_to_async(SystemSettings.objects.first)()
+        
+        if settings_obj:
+            await sync_to_async(settings_obj.save)(update_fields=['hours_per_stavka'])
+        else:
+            await sync_to_async(SystemSettings.objects.create)(hours_per_stavka=hours)
+        
+        await message.answer(f"✅ 1 stavka = {hours} soat/hafta")
+    except (IndexError, ValueError):
+        await message.answer("❌ Format: /stavka [soat] (masalan: /stavka 20)")
+
+
+@router.message(F.text.startswith("/group_add"))
+async def cmd_add_group(message: types.Message):
+    """Guruh qo'shish"""
+    user_id = message.from_user.id
+    
+    if user_id != SUPERADMIN_ID:
+        await message.answer("❌ Faqat superadmin.")
+        return
+    
+    try:
+        group_name = message.text.split()[1]
+        
+        settings_obj = await sync_to_async(SystemSettings.objects.first)()
+        if not settings_obj:
+            await sync_to_async(SystemSettings.objects.create)()
+            settings_obj = await sync_to_async(SystemSettings.objects.first)()
+        
+        settings_obj.add_group(group_name)
+        await message.answer(f"✅ Guruh '{group_name}' qo'shildi.")
+    except IndexError:
+        await message.answer("❌ Format: /group_add [nomi] (masalan: /group_add KI-220)")
+
+
+@router.message(F.text.startswith("/group_remove"))
+async def cmd_remove_group(message: types.Message):
+    """Guruh o'chirish"""
+    user_id = message.from_user.id
+    
+    if user_id != SUPERADMIN_ID:
+        await message.answer("❌ Faqat superadmin.")
+        return
+    
+    try:
+        group_name = message.text.split()[1]
+        
+        settings_obj = await sync_to_async(SystemSettings.objects.first)()
+        if not settings_obj:
+            await message.answer("❌ Tizim sozlamalari yo'q.")
+            return
+        
+        settings_obj.remove_group(group_name)
+        await message.answer(f"✅ Guruh '{group_name}' o'chirildi.")
+    except IndexError:
+        await message.answer("❌ Format: /group_remove [nomi] (masalan: /group_remove KI-220)")
 
 
 @router.message(AdminStates.settings_hours_per_stavka)
@@ -684,8 +768,8 @@ async def process_export_group(message: types.Message, state: FSMContext):
         return
     
     # CSV yaratish
-    csv_buffer = io.StringIO()
-    csv_writer = csv.writer(csv_buffer)
+    csv_content = io.StringIO()
+    csv_writer = csv.writer(csv_content)
     
     # Header
     csv_writer.writerow(['Kun', 'Para', 'Fan', 'Dars turi', 'O\'qituvchi', 'Auditoriya'])
@@ -703,62 +787,64 @@ async def process_export_group(message: types.Message, state: FSMContext):
             slot.room.name
         ])
     
-    csv_buffer.seek(0)
-    
-    # PDF yaratish
-    pdf_buffer = io.BytesIO()
-    doc = SimpleDocTemplate(pdf_buffer, pagesize=letter)
-    
-    # Jadval ma'lumotlari
-    data = [['Kun', 'Para', 'Fan', 'Dars turi', 'O\'qituvchi', 'Auditoriya']]
-    
-    for slot in slots:
-        day_name = _get_day_name(slot.day_of_week)
-        lesson_type_uz = "Ma'ruza" if slot.lesson_type == 'lecture' else "Seminar"
-        data.append([
-            day_name,
-            f"{slot.pair_number}",
-            slot.subject.name,
-            lesson_type_uz,
-            slot.teacher.full_name,
-            slot.room.name
-        ])
-    
-    # Jadval yaratish
-    table = Table(data)
-    table.setStyle(TableStyle([
-        ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
-        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-        ('FONTSIZE', (0, 0), (-1, 0), 12),
-        ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-        ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
-        ('GRID', (0, 0), (-1, -1), 1, colors.black),
-    ]))
-    
-    doc.build([table])
-    pdf_buffer.seek(0)
+    csv_bytes = csv_content.getvalue().encode('utf-8-sig')  # UTF-8 with BOM for Excel compatibility
     
     # CSV yuborish
-    csv_buffer.seek(0)
     await message.answer_document(
         types.BufferedInputFile(
-            csv_buffer.getvalue().encode('utf-8'),
+            csv_bytes,
             filename=f"{group_name}_jadval.csv"
         ),
         caption=f"📄 {group_name} guruh jadvali (CSV)"
     )
     
-    # PDF yuborish
-    pdf_buffer.seek(0)
-    await message.answer_document(
-        types.BufferedInputFile(
-            pdf_buffer.getvalue(),
-            filename=f"{group_name}_jadval.pdf"
-        ),
-        caption=f"📄 {group_name} guruh jadvali (PDF)"
-    )
+    # PDF yaratish
+    try:
+        pdf_buffer = io.BytesIO()
+        doc = SimpleDocTemplate(pdf_buffer, pagesize=letter)
+        
+        # Jadval ma'lumotlari
+        data = [['Kun', 'Para', 'Fan', 'Dars turi', 'O\'qituvchi', 'Auditoriya']]
+        
+        for slot in slots:
+            day_name = _get_day_name(slot.day_of_week)
+            lesson_type_uz = "Ma'ruza" if slot.lesson_type == 'lecture' else "Seminar"
+            data.append([
+                day_name,
+                f"{slot.pair_number}",
+                slot.subject.name,
+                lesson_type_uz,
+                slot.teacher.full_name,
+                slot.room.name
+            ])
+        
+        # Jadval yaratish
+        table = Table(data, colWidths=[80, 50, 120, 80, 120, 80])
+        table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, 0), 10),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+            ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+            ('GRID', (0, 0), (-1, -1), 1, colors.black),
+            ('FONTSIZE', (0, 1), (-1, -1), 9),
+        ]))
+        
+        doc.build([table])
+        pdf_buffer.seek(0)
+        
+        # PDF yuborish
+        await message.answer_document(
+            types.BufferedInputFile(
+                pdf_buffer.getvalue(),
+                filename=f"{group_name}_jadval.pdf"
+            ),
+            caption=f"📄 {group_name} guruh jadvali (PDF)"
+        )
+    except Exception as e:
+        await message.answer(f"⚠️ PDF yaratishda xatolik: {str(e)}")
     
     await message.answer("✅ Jadval muvaffaqiyatli yuborildi!", reply_markup=get_admin_keyboard())
     await state.clear()

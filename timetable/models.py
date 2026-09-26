@@ -5,6 +5,7 @@ from django.core.exceptions import ValidationError
 class SystemSettings(models.Model):
     """Tizim sozlamalari - superadmin tomonidan boshqariladi"""
     hours_per_stavka = models.IntegerField(default=20, verbose_name="1 stavkada soatlar soni")
+    allowed_groups = models.TextField(blank=True, help_text="Ruxsat etilgan guruhlar (vergul bilan ajratilgan)", verbose_name="Ruxsat etilgan guruhlar")
     
     class Meta:
         verbose_name = 'Tizim sozlamalari'
@@ -18,6 +19,28 @@ class SystemSettings(models.Model):
         if not self.pk and SystemSettings.objects.exists():
             raise ValidationError("Faqat bitta tizim sozlamalari yozuvi bo'lishi mumkin")
         super().save(*args, **kwargs)
+    
+    def get_allowed_groups(self):
+        """Ruxsat etilgan guruhlarni ro'yxat sifatida qaytarish"""
+        if not self.allowed_groups:
+            return []
+        return [g.strip() for g in self.allowed_groups.split(',') if g.strip()]
+    
+    def add_group(self, group_name):
+        """Guruh qo'shish"""
+        groups = self.get_allowed_groups()
+        if group_name not in groups:
+            groups.append(group_name)
+            self.allowed_groups = ','.join(groups)
+            self.save()
+    
+    def remove_group(self, group_name):
+        """Guruh o'chirish"""
+        groups = self.get_allowed_groups()
+        if group_name in groups:
+            groups.remove(group_name)
+            self.allowed_groups = ','.join(groups)
+            self.save()
 
 
 class Teacher(models.Model):

@@ -1,0 +1,85 @@
+# Smart Timetable - Misol Ma'lumotlar
+# Bu fayldagi ma'lumotlar bot orqali yoki admin panel orqali qo'shilishi mumkin
+
+# ============================================
+# FANLAR (6 ta)
+# Format: FAN_NOMI|FAN_KODI
+# ============================================
+Oliy Matematika|MATH101
+Fizika|PHYS101
+Ingliz Tili|ENG101
+Dasturlash Asoslari|PROG101
+Ma'lumotlar Bazasi|DB101
+Algoritmlar va Ma'lumotlar Tuzilmasi|ALGO101
+
+# ============================================
+# AUDITORIYALAR (5 ta)
+# Format: AUDITORIYA_NOMI|SIG'IM
+# ============================================
+301-xona|40
+302-xona|35
+303-xona|30
+204-xona (Lab)|25
+205-xona (Lab)|25
+
+# ============================================
+# O'QITUVCHILAR (12 ta)
+# Format: ISM|DARAJA|TELEFON|STAVKA
+# Darajalar: professor, dotsent, katta_oqituvchi, assistent
+# Stavka: 1.0 = 20 soat/hafta, 0.75 = 15 soat/hafta, 0.5 = 10 soat/hafta
+# ============================================
+Karimov Aziz|professor|998901234567|1.0
+Rahimova Nilufar|dotsent|998902345678|1.0
+Toshmatov Bobur|katta_oqituvchi|998903456789|1.0
+Qodirova Malika|dotsent|998904567890|1.0
+Saidov Jamshid|professor|998905678901|0.75
+Hakimova Zarnigor|katta_oqituvchi|998906789012|0.75
+Nazarov Dilshod|assistent|998907890123|0.75
+Yuldasheva Kamola|katta_oqituvchi|998908901234|0.75
+Akbarov Sardor|assistent|998909012345|0.5
+Murodova Shohista|assistent|998910123456|0.5
+Zokirov Behzod|katta_oqituvchi|998911234567|0.5
+Gafurova Nargiza|assistent|998912345678|0.5
+
+# ============================================
+# O'QUV REJALARI (18 ta - 3 guruh x 6 fan)
+# Format: FAN_KODI|O'QITUVCHI_ISMI|GURUH_NOMI|MA'RUZA_SOAT|SEMINAR_SOAT
+# ============================================
+MATH101|Karimov Aziz|KI-210|2|2
+PHYS101|Rahimova Nilufar|KI-210|2|2
+ENG101|Toshmatov Bobur|KI-210|2|2
+PROG101|Qodirova Malika|KI-210|2|2
+DB101|Saidov Jamshid|KI-210|2|1
+ALGO101|Hakimova Zarnigor|KI-210|2|1
+
+MATH101|Karimov Aziz|KI-211|2|2
+PHYS101|Rahimova Nilufar|KI-211|2|2
+ENG101|Toshmatov Bobur|KI-211|2|2
+PROG101|Qodirova Malika|KI-211|2|2
+DB101|Saidov Jamshid|KI-211|2|1
+ALGO101|Hakimova Zarnigor|KI-211|2|1
+
+MATH101|Karimov Aziz|KI-212|2|2
+PHYS101|Rahimova Nilufar|KI-212|2|2
+ENG101|Toshmatov Bobur|KI-212|2|2
+PROG101|Qodirova Malika|KI-212|2|2
+DB101|Saidov Jamshid|KI-212|2|1
+ALGO101|Hakimova Zarnigor|KI-212|2|1
+
+# ============================================
+# QO'SHISH BO'YICHA TAVSIYALAR:
+# ============================================
+# 1. Avval fanlarni qo'shing (botda "📚 Fan qo'shish" tugmasi)
+# 2. Keyin auditoriyalarni qo'shing (botda "🚪 Auditoriya qo'shish" tugmasi)
+# 3. Keyin o'qituvchilarni qo'shing (botda "👨‍🏫 O'qituvchi qo'shish" tugmasi)
+# 4. Oxirida o'quv rejasini qo'shing (botda "📝 O'quv rejasi qo'shish" tugmasi)
+# 5. Jadvalni generatsiya qiling (botda "🔄 Jadvalni yangilash" tugmasi)
+
+# ============================================
+# STAVKA HAQIDA:
+# ============================================
+# 1.0 stavka = 20 soat/hafta (to'liq stavka)
+# 0.75 stavka = 15 soat/hafta (3/4 stavka)
+# 0.5 stavka = 10 soat/hafta (yarim stavka)
+# Jadval generatsiya qilganda o'qituvchining stavkasiga qarab 
+# haftalik soatlari cheklanadi

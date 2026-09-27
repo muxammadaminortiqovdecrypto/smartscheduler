@@ -243,9 +243,9 @@ async def callback_admin_export(callback: types.CallbackQuery):
 @router.callback_query(F.data.startswith("export_csv_"))
 async def callback_export_csv(callback: types.CallbackQuery):
     """CSV file yuborish"""
-    group_name = callback.data.split("_")[2]
-    
     try:
+        group_name = callback.data.replace("export_csv_", "")
+        
         # Jadval ma'lumotlarini olish
         slots = await sync_to_async(
             lambda: list(TimetableSlot.objects.filter(group_name=group_name).order_by('day_of_week', 'pair_number'))
@@ -287,20 +287,23 @@ async def callback_export_csv(callback: types.CallbackQuery):
             filename=f"{group_name}_jadval.csv"
         )
         
-        await callback.message.edit_text(f"� {group_name} guruh jadvali (CSV)")
+        await callback.message.edit_text(f"📄 {group_name} guruh jadvali (CSV)")
         await callback.message.answer_document(file)
         await callback.answer("✅ CSV yuborildi")
         
     except Exception as e:
+        print(f"CSV export xatoligi: {e}")
+        import traceback
+        traceback.print_exc()
         await callback.answer(f"❌ Xatolik: {str(e)}", show_alert=True)
 
 
 @router.callback_query(F.data.startswith("export_pdf_"))
 async def callback_export_pdf(callback: types.CallbackQuery):
     """PDF file yuborish"""
-    group_name = callback.data.split("_")[2]
-    
     try:
+        group_name = callback.data.replace("export_pdf_", "")
+        
         # Jadval ma'lumotlarini olish
         slots = await sync_to_async(
             lambda: list(TimetableSlot.objects.filter(group_name=group_name).order_by('day_of_week', 'pair_number'))
@@ -374,6 +377,9 @@ async def callback_export_pdf(callback: types.CallbackQuery):
         await callback.answer("✅ PDF yuborildi")
         
     except Exception as e:
+        print(f"PDF export xatoligi: {e}")
+        import traceback
+        traceback.print_exc()
         await callback.answer(f"❌ Xatolik: {str(e)}", show_alert=True)
 
 

@@ -244,12 +244,19 @@ async def callback_admin_export(callback: types.CallbackQuery):
 async def callback_export_csv(callback: types.CallbackQuery):
     """CSV file yuborish"""
     try:
-        group_name = callback.data.replace("export_csv_", "")
+        # Callback data ni parse qilish
+        callback_data = callback.data
+        print(f"CSV export callback data: {callback_data}")
+        
+        group_name = callback_data.replace("export_csv_", "")
+        print(f"Extracted group name: {group_name}")
         
         # Jadval ma'lumotlarini olish
         slots = await sync_to_async(
             lambda: list(TimetableSlot.objects.filter(group_name=group_name).order_by('day_of_week', 'pair_number'))
         )()
+        
+        print(f"Found {len(slots)} slots")
         
         if not slots:
             await callback.answer("❌ Jadval topilmadi", show_alert=True)
@@ -282,8 +289,11 @@ async def callback_export_csv(callback: types.CallbackQuery):
         
         # File yuborish
         output.seek(0)
+        csv_data = output.getvalue().encode('utf-8-sig')
+        print(f"CSV data size: {len(csv_data)} bytes")
+        
         file = types.BufferedInputFile(
-            output.getvalue().encode('utf-8-sig'),
+            csv_data,
             filename=f"{group_name}_jadval.csv"
         )
         

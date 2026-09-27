@@ -142,9 +142,11 @@ async def callback_group_detail(callback: types.CallbackQuery):
     """Guruh tafsilotlari"""
     group_name = callback.data.split("_")[1]
     
-    # Guruh jadvalini olish
+    # Guruh jadvalini olish - select_related bilan related fieldsni yuklash
     slots = await sync_to_async(
-        lambda: list(TimetableSlot.objects.filter(group_name=group_name).order_by('day_of_week', 'pair_number'))
+        lambda: list(TimetableSlot.objects.filter(group_name=group_name)
+                    .select_related('subject', 'teacher', 'room')
+                    .order_by('day_of_week', 'pair_number'))
     )()
     
     if not slots:
@@ -251,9 +253,11 @@ async def callback_export_csv(callback: types.CallbackQuery):
         group_name = callback_data.replace("export_csv_", "")
         print(f"Extracted group name: {group_name}")
         
-        # Jadval ma'lumotlarini olish
+        # Jadval ma'lumotlarini olish - select_related bilan related fieldsni yuklash
         slots = await sync_to_async(
-            lambda: list(TimetableSlot.objects.filter(group_name=group_name).order_by('day_of_week', 'pair_number'))
+            lambda: list(TimetableSlot.objects.filter(group_name=group_name)
+                        .select_related('subject', 'teacher', 'room')
+                        .order_by('day_of_week', 'pair_number'))
         )()
         
         print(f"Found {len(slots)} slots")
@@ -314,9 +318,11 @@ async def callback_export_pdf(callback: types.CallbackQuery):
     try:
         group_name = callback.data.replace("export_pdf_", "")
         
-        # Jadval ma'lumotlarini olish
+        # Jadval ma'lumotlarini olish - select_related bilan related fieldsni yuklash
         slots = await sync_to_async(
-            lambda: list(TimetableSlot.objects.filter(group_name=group_name).order_by('day_of_week', 'pair_number'))
+            lambda: list(TimetableSlot.objects.filter(group_name=group_name)
+                        .select_related('subject', 'teacher', 'room')
+                        .order_by('day_of_week', 'pair_number'))
         )()
         
         if not slots:

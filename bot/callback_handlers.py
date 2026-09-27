@@ -244,57 +244,55 @@ async def callback_admin_export(callback: types.CallbackQuery):
 
 @router.callback_query(F.data.startswith("export_csv_"))
 async def callback_export_csv(callback: types.CallbackQuery):
-    """CSV file yuborish"""
+    """CSV file yuborish - optimizatsiyalangan"""
     try:
-        # Callback data ni parse qilish
         callback_data = callback.data
         print(f"CSV export callback data: {callback_data}")
         
         group_name = callback_data.replace("export_csv_", "")
         print(f"Extracted group name: {group_name}")
         
-        # Jadval ma'lumotlarini olish - select_related bilan related fieldsni yuklash
-        slots = await sync_to_async(
-            lambda: list(TimetableSlot.objects.filter(group_name=group_name)
+        # Sync contextda export funksiyasini ishlatish
+        def export_csv_sync():
+            slots = list(TimetableSlot.objects.filter(group_name=group_name)
                         .select_related('subject', 'teacher', 'room')
                         .order_by('day_of_week', 'pair_number'))
-        )()
+            
+            if not slots:
+                return None, None
+            
+            import csv
+            import io
+            
+            output = io.StringIO()
+            writer = csv.writer(output, quoting=csv.QUOTE_ALL)
+            writer.writerow(['Kun', 'Para', 'Fan', 'Dars turi', "O'qituvchi", 'Auditoriya'])
+            
+            day_names = {1: 'Dushanba', 2: 'Seshanba', 3: 'Chorshanba', 4: 'Payshanba', 5: 'Juma', 6: 'Shanba'}
+            
+            for slot in slots:
+                day_name = day_names.get(slot.day_of_week, str(slot.day_of_week))
+                lesson_type_uz = "Ma'ruza" if slot.lesson_type == 'lecture' else "Seminar"
+                writer.writerow([
+                    day_name,
+                    str(slot.pair_number),
+                    slot.subject.name,
+                    lesson_type_uz,
+                    slot.teacher.full_name,
+                    slot.room.name
+                ])
+            
+            output.seek(0)
+            csv_data = output.getvalue().encode('utf-8-sig')
+            return csv_data, len(slots)
         
-        print(f"Found {len(slots)} slots")
+        csv_data, slot_count = await sync_to_async(export_csv_sync)()
         
-        if not slots:
+        if csv_data is None:
             await callback.answer("❌ Jadval topilmadi", show_alert=True)
             return
         
-        # CSV yaratish
-        import csv
-        import io
-        
-        output = io.StringIO()
-        writer = csv.writer(output, quoting=csv.QUOTE_ALL)
-        
-        # Sarlavha
-        writer.writerow(['Kun', 'Para', 'Fan', 'Dars turi', "O'qituvchi", 'Auditoriya'])
-        
-        # Ma'lumotlar
-        day_names = {1: 'Dushanba', 2: 'Seshanba', 3: 'Chorshanba', 4: 'Payshanba', 5: 'Juma', 6: 'Shanba'}
-        
-        for slot in slots:
-            day_name = day_names.get(slot.day_of_week, str(slot.day_of_week))
-            lesson_type_uz = "Ma'ruza" if slot.lesson_type == 'lecture' else "Seminar"
-            writer.writerow([
-                day_name,
-                str(slot.pair_number),
-                slot.subject.name,
-                lesson_type_uz,
-                slot.teacher.full_name,
-                slot.room.name
-            ])
-        
-        # File yuborish
-        output.seek(0)
-        csv_data = output.getvalue().encode('utf-8-sig')
-        print(f"CSV data size: {len(csv_data)} bytes")
+        print(f"CSV data size: {len(csv_data)} bytes, slots: {slot_count}")
         
         file = types.BufferedInputFile(
             csv_data,
@@ -314,77 +312,99 @@ async def callback_export_csv(callback: types.CallbackQuery):
 
 @router.callback_query(F.data.startswith("export_pdf_"))
 async def callback_export_pdf(callback: types.CallbackQuery):
-    """PDF file yuborish"""
+    """PDF file yuborish - optimizatsiyalangan"""
     try:
         group_name = callback.data.replace("export_pdf_", "")
         
-        # Jadval ma'lumotlarini olish - select_related bilan related fieldsni yuklash
-        slots = await sync_to_async(
-            lambda: list(TimetableSlot.objects.filter(group_name=group_name)
+        # Sync contextda export funksiyasini ishlatish
+        def export_pdf_sync():
+            slots = list(TimetableSlot.objects.filter(group_name=group_name)
                         .select_related('subject', 'teacher', 'room')
                         .order_by('day_of_week', 'pair_number'))
-        )()
+            
+            if not slots:
+                return None
+            
+            # PDF yaratish
+            from reportlab.lib.pagesizes import letter, A4, landscape
+            from reportlab.lib import colors
+            from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+            from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+            from reportlab.lib.enums import TA_CENTER
+            import io
+            
+            output = io.BytesIO()
+            doc = SimpleDocTemplate(
+                output,
+                pagesize=landscape(A4),
+                leftMargin=24, rightMargin=24, topMargin=24, bottomMargin=24,
+            )
+            
+            elements = []
+            styles = getSampleStyleSheet()
+            
+            # Sarlavha
+            title_style = styles['Heading1']
+            title_style.alignment = 1
+            elements.append(Paragraph(f"{group_name} Guruh Jadvali", title_style))
+            elements.append(Spacer(1, 16))
+            
+            # Header va cell styles
+            header_style = ParagraphStyle(
+                'header', fontName='Helvetica-Bold', fontSize=9,
+                textColor=colors.whitesmoke, alignment=TA_CENTER, leading=11,
+            )
+            cell_style = ParagraphStyle(
+                'cell', fontName='Helvetica', fontSize=8,
+                alignment=TA_CENTER, leading=10, wordWrap='CJK',
+            )
+            
+            # Jadval ma'lumotlari
+            headers = ['Kun', 'Para', 'Fan', 'Dars turi', "O'qituvchi", 'Auditoriya']
+            data = [[Paragraph(h, header_style) for h in headers]]
+            
+            day_names = {1: 'Dushanba', 2: 'Seshanba', 3: 'Chorshanba', 4: 'Payshanba', 5: 'Juma', 6: 'Shanba'}
+            
+            for slot in slots:
+                day_name = day_names.get(slot.day_of_week, str(slot.day_of_week))
+                lesson_type_uz = "Ma'ruza" if slot.lesson_type == 'lecture' else "Seminar"
+                row_values = [
+                    day_name,
+                    str(slot.pair_number),
+                    slot.subject.name,
+                    lesson_type_uz,
+                    slot.teacher.full_name,
+                    slot.room.name,
+                ]
+                data.append([Paragraph(str(v), cell_style) for v in row_values])
+            
+            # Jadval yaratish
+            col_widths = [65, 40, 170, 75, 155, 90]
+            table = Table(data, colWidths=col_widths, repeatRows=1)
+            table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                ('TOPPADDING', (0, 0), (-1, -1), 5),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+                ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.beige, colors.white]),
+                ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
+            ]))
+            
+            elements.append(table)
+            doc.build(elements)
+            
+            output.seek(0)
+            return output.getvalue()
         
-        if not slots:
+        pdf_data = await sync_to_async(export_pdf_sync)()
+        
+        if pdf_data is None:
             await callback.answer("❌ Jadval topilmadi", show_alert=True)
             return
         
-        # PDF yaratish
-        from reportlab.lib.pagesizes import letter, A4
-        from reportlab.lib import colors
-        from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
-        from reportlab.lib.styles import getSampleStyleSheet
-        import io
-        
-        output = io.BytesIO()
-        doc = SimpleDocTemplate(output, pagesize=A4)
-        
-        elements = []
-        styles = getSampleStyleSheet()
-        
-        # Sarlavha
-        title_style = styles['Heading1']
-        title_style.alignment = 1  # Center
-        elements.append(Paragraph(f"{group_name} Guruh Jadvali", title_style))
-        elements.append(Spacer(1, 20))
-        
-        # Jadval ma'lumotlari
-        data = [['Kun', 'Para', 'Fan', 'Dars turi', "O'qituvchi", 'Auditoriya']]
-        
-        day_names = {1: 'Dushanba', 2: 'Seshanba', 3: 'Chorshanba', 4: 'Payshanba', 5: 'Juma', 6: 'Shanba'}
-        
-        for slot in slots:
-            day_name = day_names.get(slot.day_of_week, str(slot.day_of_week))
-            lesson_type_uz = "Ma'ruza" if slot.lesson_type == 'lecture' else "Seminar"
-            data.append([
-                day_name,
-                f"{slot.pair_number}",
-                slot.subject.name,
-                lesson_type_uz,
-                slot.teacher.full_name,
-                slot.room.name
-            ])
-        
-        # Jadval yaratish
-        table = Table(data, colWidths=[1.5*inch, 1*inch, 2*inch, 1.5*inch, 2*inch, 1.5*inch])
-        table.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
-            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-            ('FONTSIZE', (0, 0), (-1, 0), 12),
-            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-            ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
-            ('GRID', (0, 0), (-1, -1), 1, colors.black),
-        ]))
-        
-        elements.append(table)
-        doc.build(elements)
-        
-        # File yuborish
-        output.seek(0)
         file = types.BufferedInputFile(
-            output.getvalue(),
+            pdf_data,
             filename=f"{group_name}_jadval.pdf"
         )
         
@@ -407,17 +427,3 @@ async def callback_admin_back(callback: types.CallbackQuery):
         reply_markup=get_admin_inline_keyboard()
     )
     await callback.answer()
-
-
-@router.callback_query()
-async def catch_all_callbacks(callback: types.CallbackQuery):
-    """Barcha callback larni log qilish (debug uchun)"""
-    print(f"🔍 CATCH-ALL CALLBACK: {callback.data}")
-    await callback.answer("⚠️ Noma'lum amal", show_alert=True)
-
-
-@router.message()
-async def catch_all_messages(message: types.Message):
-    """Barcha xabarlarni log qilish (debug uchun)"""
-    print(f"🔍 CATCH-ALL MESSAGE: {message.text}")
-    # Boshqa handlerlar tomonidan ishlov berilishi uchun hech narsa qilmaymiz

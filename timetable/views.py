@@ -3,10 +3,14 @@ from django.http import Http404, HttpResponse
 from .models import TimetableSlot, SystemSettings
 import datetime
 import csv
-from reportlab.lib.pagesizes import letter, A4
+from reportlab.lib.pagesizes import letter, A4, landscape
 from reportlab.lib import colors
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.enums import TA_CENTER
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
-from reportlab.lib.styles import getSampleStyleSheet
+
+
+DAY_NAMES = {1: 'Dushanba', 2: 'Seshanba', 3: 'Chorshanba', 4: 'Payshanba', 5: 'Juma', 6: 'Shanba'}
 
 
 def schedule_view(request):
@@ -63,16 +67,6 @@ def group_schedule_view(request, group_name):
     today = datetime.date.today()
     day_of_week = today.isoweekday()  # 1-Dushanba ... 7-Yakshanba
     
-    # Hafta kunlari
-    day_names = {
-        1: 'Dushanba',
-        2: 'Seshanba',
-        3: 'Chorshanba',
-        4: 'Payshanba',
-        5: 'Juma',
-        6: 'Shanba',
-    }
-    
     # Barcha darslarni olish (matching_group asl nomi bilan)
     slots = TimetableSlot.objects.filter(group_name=matching_group).order_by('day_of_week', 'pair_number')
     
@@ -90,7 +84,7 @@ def group_schedule_view(request, group_name):
         if schedule_by_day[day_num]:
             schedule_data.append({
                 'day_num': day_num,
-                'day_name': day_names.get(day_num, str(day_num)),
+                'day_name': DAY_NAMES.get(day_num, str(day_num)),
                 'slots': schedule_by_day[day_num]
             })
     
@@ -105,7 +99,7 @@ def group_schedule_view(request, group_name):
     if export_format == 'csv':
         return export_schedule_csv(matching_group, slots)
     elif export_format == 'pdf':
-        return export_schedule_pdf(matching_group, slots, day_names)
+        return export_schedule_pdf(matching_group, slots, DAY_NAMES)
     
     return render(request, 'group_schedule.html', context)
 
@@ -114,14 +108,12 @@ def export_schedule_csv(group_name, slots):
     """CSV export"""
     response = HttpResponse(content_type='text/csv; charset=utf-8-sig')
     response['Content-Disposition'] = f'attachment; filename="{group_name}_jadval.csv"'
-    
+
     writer = csv.writer(response, quoting=csv.QUOTE_ALL)
-    writer.writerow(['Kun', 'Para', 'Fan', 'Dars turi', 'O\'qituvchi', 'Auditoriya'])
-    
-    day_names = {1: 'Dushanba', 2: 'Seshanba', 3: 'Chorshanba', 4: 'Payshanba', 5: 'Juma', 6: 'Shanba'}
-    
+    writer.writerow(['Kun', 'Para', 'Fan', 'Dars turi', "O'qituvchi", 'Auditoriya'])
+
     for slot in slots:
-        day_name = day_names.get(slot.day_of_week, str(slot.day_of_week))
+        day_name = DAY_NAMES.get(slot.day_of_week, str(slot.day_of_week))
         lesson_type_uz = "Ma'ruza" if slot.lesson_type == 'lecture' else "Seminar"
         writer.writerow([
             day_name,
@@ -129,57 +121,69 @@ def export_schedule_csv(group_name, slots):
             slot.subject.name,
             lesson_type_uz,
             slot.teacher.full_name,
-            slot.room.name
+            slot.room.name,
         ])
-    
+
     return response
 
 
 def export_schedule_pdf(group_name, slots, day_names):
-    """PDF export"""
+    """PDF export - optimizatsiyalangan"""
     response = HttpResponse(content_type='application/pdf')
     response['Content-Disposition'] = f'attachment; filename="{group_name}_jadval.pdf"'
-    
-    doc = SimpleDocTemplate(response, pagesize=A4)
+
+    doc = SimpleDocTemplate(
+        response,
+        pagesize=landscape(A4),
+        leftMargin=24, rightMargin=24, topMargin=24, bottomMargin=24,
+    )
     elements = []
-    
+
     styles = getSampleStyleSheet()
     title_style = styles['Heading1']
     title_style.alignment = 1  # Center
-    
+
     elements.append(Paragraph(f"{group_name} Guruh Jadvali", title_style))
-    elements.append(Spacer(1, 20))
-    
-    # Jadval ma'lumotlari
-    data = [['Kun', 'Para', 'Fan', 'Dars turi', 'O\'qituvchi', 'Auditoriya']]
-    
+    elements.append(Spacer(1, 16))
+
+    header_style = ParagraphStyle(
+        'header', fontName='Helvetica-Bold', fontSize=9,
+        textColor=colors.whitesmoke, alignment=TA_CENTER, leading=11,
+    )
+    cell_style = ParagraphStyle(
+        'cell', fontName='Helvetica', fontSize=8,
+        alignment=TA_CENTER, leading=10, wordWrap='CJK',
+    )
+
+    headers = ['Kun', 'Para', 'Fan', 'Dars turi', "O'qituvchi", 'Auditoriya']
+    data = [[Paragraph(h, header_style) for h in headers]]
+
     for slot in slots:
         day_name = day_names.get(slot.day_of_week, str(slot.day_of_week))
         lesson_type_uz = "Ma'ruza" if slot.lesson_type == 'lecture' else "Seminar"
-        data.append([
+        row_values = [
             day_name,
             str(slot.pair_number),
             slot.subject.name,
             lesson_type_uz,
             slot.teacher.full_name,
-            slot.room.name
-        ])
-    
-    # Jadval yaratish
-    table = Table(data, colWidths=[60, 40, 100, 60, 100, 60])
+            slot.room.name,
+        ]
+        data.append([Paragraph(str(v), cell_style) for v in row_values])
+
+    col_widths = [65, 40, 170, 75, 155, 90]
+    table = Table(data, colWidths=col_widths, repeatRows=1)
     table.setStyle(TableStyle([
         ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
-        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
         ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-        ('FONTSIZE', (0, 0), (-1, 0), 10),
-        ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-        ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
-        ('GRID', (0, 0), (-1, -1), 1, colors.black),
-        ('FONTSIZE', (0, 1), (-1, -1), 9),
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ('TOPPADDING', (0, 0), (-1, -1), 5),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.beige, colors.white]),
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
     ]))
-    
+
     elements.append(table)
     doc.build(elements)
-    
+
     return response

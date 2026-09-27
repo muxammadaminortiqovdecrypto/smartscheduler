@@ -24,7 +24,7 @@ from bot.handlers import router as handlers_router
 from bot.callback_handlers import router as callback_router
 
 # Logging sozlamalari
-logging.basicConfig(level=logging.INFO, stream=sys.stdout)
+logging.basicConfig(level=logging.DEBUG, stream=sys.stdout)
 
 
 async def main():

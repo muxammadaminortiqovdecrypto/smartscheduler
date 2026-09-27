@@ -406,5 +406,12 @@ async def callback_admin_back(callback: types.CallbackQuery):
 @router.callback_query()
 async def catch_all_callbacks(callback: types.CallbackQuery):
     """Barcha callback larni log qilish (debug uchun)"""
-    print(f"Unhandled callback: {callback.data}")
+    print(f"🔍 CATCH-ALL CALLBACK: {callback.data}")
     await callback.answer("⚠️ Noma'lum amal", show_alert=True)
+
+
+@router.message()
+async def catch_all_messages(message: types.Message):
+    """Barcha xabarlarni log qilish (debug uchun)"""
+    print(f"🔍 CATCH-ALL MESSAGE: {message.text}")
+    # Boshqa handlerlar tomonidan ishlov berilishi uchun hech narsa qilmaymiz

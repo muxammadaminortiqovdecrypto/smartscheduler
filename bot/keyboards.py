@@ -26,8 +26,8 @@ def get_admin_keyboard():
         [KeyboardButton(text="🚪 Auditoriya qo'shish")],
         [KeyboardButton(text="📝 O'quv rejasi qo'shish")],
         [KeyboardButton(text="⚙️ Tizim sozlamalari")],
-        [KeyboardButton(text="� Guruh jadvalini yuklab olish")],
-        [KeyboardButton(text="�🔄 Jadvalni yangilash")],
+        [KeyboardButton(text="📥 Guruh jadvalini yuklab olish")],
+        [KeyboardButton(text="🔄 Jadvalni yangilash")],
         [KeyboardButton(text="📅 Bugungi dars jadvalim")],
         [KeyboardButton(text="📊 Haftalik jadval")],
     ]
@@ -84,7 +84,7 @@ def get_resources_inline_keyboard():
     """Resurslar inline klaviaturasi"""
     buttons = [
         [
-            InlineKeyboardButton(text="�‍🏫 O'qituvchilar", callback_data="admin_teacher"),
+            InlineKeyboardButton(text="👨‍🏫 O'qituvchilar", callback_data="admin_teacher"),
             InlineKeyboardButton(text="📚 Fanlar", callback_data="admin_subject"),
         ],
         [

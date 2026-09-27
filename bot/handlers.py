@@ -573,6 +573,22 @@ async def cmd_regenerate_schedule(message: types.Message):
         await message.answer(f"❌ Xatolik: {str(e)}")
 
 
+@router.message(F.text == "📥 Guruh jadvalini yuklab olish")
+async def cmd_export_schedule(message: types.Message):
+    """Guruh jadvalini yuklab olish - inline keyboard yuborish"""
+    print(f"🔍 EXPORT HANDLER TRIGGERED: {message.text}")
+    if not await check_admin(message):
+        await message.answer("❌ Sizda bu amalni bajarish uchun huquq yo'q.")
+        return
+    
+    from .keyboards import get_admin_inline_keyboard
+    await message.answer(
+        "⚙️ Admin panel",
+        reply_markup=get_admin_inline_keyboard()
+    )
+    print("🔍 INLINE KEYBOARD SENT")
+
+
 @router.message(F.text == "/settings")
 async def cmd_settings(message: types.Message, state: FSMContext):
     """Tizim sozlamalarini o'zgartirish"""

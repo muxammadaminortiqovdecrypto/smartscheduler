@@ -144,3 +144,17 @@ def get_group_list_inline_keyboard(groups):
     buttons.append([InlineKeyboardButton(text="🔙 Orqaga", callback_data="admin_back")])
     
     return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+def get_group_export_keyboard(groups):
+    """Guruh export inline klaviaturasi"""
+    buttons = []
+    for group in groups:
+        buttons.append([
+            InlineKeyboardButton(text=f"📄 {group} (CSV)", callback_data=f"export_csv_{group}"),
+            InlineKeyboardButton(text=f"📄 {group} (PDF)", callback_data=f"export_pdf_{group}")
+        ])
+    
+    buttons.append([InlineKeyboardButton(text="🔙 Orqaga", callback_data="admin_back")])
+    
+    return InlineKeyboardMarkup(inline_keyboard=buttons)

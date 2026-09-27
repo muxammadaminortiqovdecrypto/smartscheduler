@@ -12,6 +12,7 @@ from .keyboards import (
     get_group_list_inline_keyboard
 )
 import datetime
+from reportlab.lib.units import inch
 
 router = Router()
 
@@ -221,7 +222,7 @@ async def callback_admin_regenerate(callback: types.CallbackQuery):
 
 @router.callback_query(F.data == "admin_export")
 async def callback_admin_export(callback: types.CallbackQuery):
-    """Guruh jadvalini yuklab olish - web link yuborish"""
+    """Guruh jadvalini yuklab olish - file yuborish"""
     groups = await sync_to_async(
         lambda: list(TimetableSlot.objects.values_list('group_name', flat=True).distinct())
     )()
@@ -230,22 +231,150 @@ async def callback_admin_export(callback: types.CallbackQuery):
         await callback.message.edit_text("❌ Jadvalda guruhlar topilmadi.")
         return
     
-    group_list = "\n".join([f"{i+1}. {group}" for i, group in enumerate(groups)])
-    
-    web_url = "http://127.0.0.1:8000"  # Localhost URL
-    
-    text = (
-        f"📥 Guruh jadvalini yuklab olish\n\n"
-        f"Mavjud guruhlar:\n{group_list}\n\n"
-        f"Web sahifada yuklab olish uchun:\n"
-        f"{web_url}/schedule/[GURUH_NOMI]/?format=csv\n"
-        f"{web_url}/schedule/[GURUH_NOMI]/?format=pdf\n\n"
-        f"Masalan:\n"
-        f"{web_url}/schedule/KI-210/?format=csv"
+    # Guruhlar uchun inline keyboard yaratish
+    from .keyboards import get_group_export_keyboard
+    await callback.message.edit_text(
+        "📥 Guruh jadvalini yuklab olish\n\nGuruhni tanlang:",
+        reply_markup=get_group_export_keyboard(groups)
     )
-    
-    await callback.message.edit_text(text)
     await callback.answer()
+
+
+@router.callback_query(F.data.startswith("export_csv_"))
+async def callback_export_csv(callback: types.CallbackQuery):
+    """CSV file yuborish"""
+    group_name = callback.data.split("_")[2]
+    
+    try:
+        # Jadval ma'lumotlarini olish
+        slots = await sync_to_async(
+            lambda: list(TimetableSlot.objects.filter(group_name=group_name).order_by('day_of_week', 'pair_number'))
+        )()
+        
+        if not slots:
+            await callback.answer("❌ Jadval topilmadi", show_alert=True)
+            return
+        
+        # CSV yaratish
+        import csv
+        import io
+        
+        output = io.StringIO()
+        writer = csv.writer(output, quoting=csv.QUOTE_ALL)
+        
+        # Sarlavha
+        writer.writerow(['Kun', 'Para', 'Fan', 'Dars turi', "O'qituvchi", 'Auditoriya'])
+        
+        # Ma'lumotlar
+        day_names = {1: 'Dushanba', 2: 'Seshanba', 3: 'Chorshanba', 4: 'Payshanba', 5: 'Juma', 6: 'Shanba'}
+        
+        for slot in slots:
+            day_name = day_names.get(slot.day_of_week, str(slot.day_of_week))
+            lesson_type_uz = "Ma'ruza" if slot.lesson_type == 'lecture' else "Seminar"
+            writer.writerow([
+                day_name,
+                str(slot.pair_number),
+                slot.subject.name,
+                lesson_type_uz,
+                slot.teacher.full_name,
+                slot.room.name
+            ])
+        
+        # File yuborish
+        output.seek(0)
+        file = types.BufferedInputFile(
+            output.getvalue().encode('utf-8-sig'),
+            filename=f"{group_name}_jadval.csv"
+        )
+        
+        await callback.message.edit_text(f"� {group_name} guruh jadvali (CSV)")
+        await callback.message.answer_document(file)
+        await callback.answer("✅ CSV yuborildi")
+        
+    except Exception as e:
+        await callback.answer(f"❌ Xatolik: {str(e)}", show_alert=True)
+
+
+@router.callback_query(F.data.startswith("export_pdf_"))
+async def callback_export_pdf(callback: types.CallbackQuery):
+    """PDF file yuborish"""
+    group_name = callback.data.split("_")[2]
+    
+    try:
+        # Jadval ma'lumotlarini olish
+        slots = await sync_to_async(
+            lambda: list(TimetableSlot.objects.filter(group_name=group_name).order_by('day_of_week', 'pair_number'))
+        )()
+        
+        if not slots:
+            await callback.answer("❌ Jadval topilmadi", show_alert=True)
+            return
+        
+        # PDF yaratish
+        from reportlab.lib.pagesizes import letter, A4
+        from reportlab.lib import colors
+        from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+        from reportlab.lib.styles import getSampleStyleSheet
+        import io
+        
+        output = io.BytesIO()
+        doc = SimpleDocTemplate(output, pagesize=A4)
+        
+        elements = []
+        styles = getSampleStyleSheet()
+        
+        # Sarlavha
+        title_style = styles['Heading1']
+        title_style.alignment = 1  # Center
+        elements.append(Paragraph(f"{group_name} Guruh Jadvali", title_style))
+        elements.append(Spacer(1, 20))
+        
+        # Jadval ma'lumotlari
+        data = [['Kun', 'Para', 'Fan', 'Dars turi', "O'qituvchi", 'Auditoriya']]
+        
+        day_names = {1: 'Dushanba', 2: 'Seshanba', 3: 'Chorshanba', 4: 'Payshanba', 5: 'Juma', 6: 'Shanba'}
+        
+        for slot in slots:
+            day_name = day_names.get(slot.day_of_week, str(slot.day_of_week))
+            lesson_type_uz = "Ma'ruza" if slot.lesson_type == 'lecture' else "Seminar"
+            data.append([
+                day_name,
+                f"{slot.pair_number}",
+                slot.subject.name,
+                lesson_type_uz,
+                slot.teacher.full_name,
+                slot.room.name
+            ])
+        
+        # Jadval yaratish
+        table = Table(data, colWidths=[1.5*inch, 1*inch, 2*inch, 1.5*inch, 2*inch, 1.5*inch])
+        table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, 0), 12),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+            ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+            ('GRID', (0, 0), (-1, -1), 1, colors.black),
+        ]))
+        
+        elements.append(table)
+        doc.build(elements)
+        
+        # File yuborish
+        output.seek(0)
+        file = types.BufferedInputFile(
+            output.getvalue(),
+            filename=f"{group_name}_jadval.pdf"
+        )
+        
+        await callback.message.edit_text(f"📄 {group_name} guruh jadvali (PDF)")
+        await callback.message.answer_document(file)
+        await callback.answer("✅ PDF yuborildi")
+        
+    except Exception as e:
+        await callback.answer(f"❌ Xatolik: {str(e)}", show_alert=True)
 
 
 @router.callback_query(F.data == "admin_back")

@@ -401,3 +401,10 @@ async def callback_admin_back(callback: types.CallbackQuery):
         reply_markup=get_admin_inline_keyboard()
     )
     await callback.answer()
+
+
+@router.callback_query()
+async def catch_all_callbacks(callback: types.CallbackQuery):
+    """Barcha callback larni log qilish (debug uchun)"""
+    print(f"Unhandled callback: {callback.data}")
+    await callback.answer("⚠️ Noma'lum amal", show_alert=True)

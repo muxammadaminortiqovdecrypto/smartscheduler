@@ -1,4 +1,4 @@
-from aiogram.types import KeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemove, InlineKeyboardButton, InlineKeyboardMarkup
+from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
 
 
 def get_phone_keyboard():
@@ -8,8 +8,18 @@ def get_phone_keyboard():
     return keyboard
 
 
+def get_role_keyboard():
+    """Rol tanlash klaviaturasi"""
+    buttons = [
+        [KeyboardButton(text="👨‍🎓 Talaba")],
+        [KeyboardButton(text="👨‍🏫 O'qituvchi")],
+    ]
+    keyboard = ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True, one_time_keyboard=True)
+    return keyboard
+
+
 def get_main_keyboard():
-    """Asosiy klaviatura"""
+    """Asosiy klaviatura - oddiy user uchun"""
     buttons = [
         [KeyboardButton(text="📅 Bugungi dars jadvalim")],
         [KeyboardButton(text="📊 Haftalik jadval")],
@@ -18,18 +28,34 @@ def get_main_keyboard():
     return keyboard
 
 
+def get_teacher_keyboard():
+    """O'qituvchi klaviaturasi"""
+    buttons = [
+        [KeyboardButton(text="� Bugungi dars jadvalim")],
+        [KeyboardButton(text="� Haftalik jadval")],
+    ]
+    keyboard = ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
+    return keyboard
+
+
 def get_admin_keyboard():
     """Admin klaviaturasi"""
     buttons = [
-        [KeyboardButton(text="👨‍🏫 O'qituvchi qo'shish")],
-        [KeyboardButton(text="📚 Fan qo'shish")],
-        [KeyboardButton(text="🚪 Auditoriya qo'shish")],
-        [KeyboardButton(text="📝 O'quv rejasi qo'shish")],
-        [KeyboardButton(text="⚙️ Tizim sozlamalari")],
-        [KeyboardButton(text="📥 Guruh jadvalini yuklab olish")],
-        [KeyboardButton(text="🔄 Jadvalni yangilash")],
+        [KeyboardButton(text="� Bugungi dars jadvalim")],
+        [KeyboardButton(text="📊 Haftalik jadval")],
+        [KeyboardButton(text="⚙️ Admin panel")],
+    ]
+    keyboard = ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
+    return keyboard
+
+
+def get_superadmin_keyboard():
+    """Superadmin klaviaturasi"""
+    buttons = [
         [KeyboardButton(text="📅 Bugungi dars jadvalim")],
         [KeyboardButton(text="📊 Haftalik jadval")],
+        [KeyboardButton(text="⚙️ Admin panel")],
+        [KeyboardButton(text="🔧 Tizim optimizatsiyasi")],
     ]
     keyboard = ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
     return keyboard

@@ -50,34 +50,80 @@ pip install -r requirements.txt
 ```env
 SECRET_KEY=django-insecure-change-this-in-production
 DEBUG=True
-DB_NAME=smartscheduler
-DB_USER=postgres
-DB_PASSWORD=postgres
-DB_HOST=localhost
-DB_PORT=5432
+# PostgreSQL uchun (production)
+DATABASE_URL=postgresql://postgres:password@localhost:5432/smartscheduler
+# Yoki alohida o'zgaruvchilar sifatida:
+# DB_NAME=smartscheduler
+# DB_USER=postgres
+# DB_PASSWORD=postgres
+# DB_HOST=localhost
+# DB_PORT=5432
 TELEGRAM_BOT_TOKEN=your_bot_token_here
 ```
 
-### 5. PostgreSQL ma'lumotlar bazasini yaratish
+**Eslatma:** Agar `DATABASE_URL` sozlanmagan bo'lsa, tizim avtomatik SQLite ishlatadi (development uchun).
 
-```sql
+### 5. Ma'lumotlar bazasi sozlamalari
+
+**Development (lokal):**
+- SQLite avtomatik ishlatiladi (`DATABASE_URL` sozlanmagan bo'lsa)
+- Hech qanday qo'shimcha sozlash talab etilmaydi
+
+**Production (PostgreSQL):**
+```bash
+# PostgreSQL o'rnatish (Ubuntu/Debian)
+sudo apt-get install postgresql postgresql-contrib
+
+# Ma'lumotlar bazasini yaratish
+sudo -u postgres psql
 CREATE DATABASE smartscheduler;
+CREATE USER smartscheduler WITH PASSWORD 'your_password';
+GRANT ALL PRIVILEGES ON DATABASE smartscheduler TO smartscheduler;
+\q
 ```
 
-### 6. Migratsiyalarni qo'llash
+### 6. Ma'lumotlar bazasini ko'chirish (SQLite ↔ PostgreSQL)
+
+**SQLite dan PostgreSQL ga:**
+```bash
+# SQLite ma'lumotlarini eksport qilish
+python manage.py dumpdata > backup.json
+
+# .env faylida DATABASE_URL sozlang
+# Migratsiyalarni qo'llash
+python manage.py migrate
+
+# Ma'lumotlarni import qilish
+python manage.py loaddata backup.json
+```
+
+**PostgreSQL dan SQLite ga:**
+```bash
+# PostgreSQL ma'lumotlarini eksport qilish
+python manage.py dumpdata > backup.json
+
+# .env faylida DATABASE_URL o'chirib tashlang
+# Migratsiyalarni qo'llash
+python manage.py migrate
+
+# Ma'lumotlarni import qilish
+python manage.py loaddata backup.json
+```
+
+### 7. Migratsiyalarni qo'llash
 
 ```bash
 python manage.py makemigrations
 python manage.py migrate
 ```
 
-### 7. Superuser yaratish
+### 8. Superuser yaratish
 
 ```bash
 python manage.py createsuperuser
 ```
 
-### 8. Ma'lumotlarni qo'shish
+### 9. Ma'lumotlarni qo'shish
 
 Django admin paneliga kirib (`http://localhost:8000/admin`):
 - O'qituvchilar (Teacher) qo'shing

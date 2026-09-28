@@ -14,19 +14,9 @@ DAY_NAMES = {1: 'Dushanba', 2: 'Seshanba', 3: 'Chorshanba', 4: 'Payshanba', 5: '
 
 
 def schedule_view(request):
-    """Bosh sahifa - guruh tanlash"""
+    """Bosh sahifa - guruh tanlash (hammaga ochiq)"""
     # Barcha guruhlarni olish
     groups = TimetableSlot.objects.values_list('group_name', flat=True).distinct()
-    
-    # Tizim sozlamalaridan ruxsat etilgan guruhlarni olish
-    settings_obj = SystemSettings.objects.first()
-    allowed_groups = []
-    if settings_obj:
-        allowed_groups = settings_obj.get_allowed_groups()
-    
-    # Faqat ruxsat etilgan guruhlarni ko'rsatish
-    if allowed_groups:
-        groups = [g for g in groups if g in allowed_groups]
     
     context = {
         'groups': sorted(groups),
@@ -35,7 +25,7 @@ def schedule_view(request):
 
 
 def group_schedule_view(request, group_name):
-    """Guruh jadvali"""
+    """Guruh jadvali (hammaga ochiq)"""
     # Guruh nomini case-insensitive qilish
     group_name_lower = group_name.lower()
     
@@ -51,24 +41,12 @@ def group_schedule_view(request, group_name):
     if not matching_group:
         raise Http404(f"'{group_name}' guruh topilmadi.")
     
-    # Tizim sozlamalaridan ruxsat etilgan guruhlarni olish
-    settings_obj = SystemSettings.objects.first()
-    allowed_groups = []
-    if settings_obj:
-        allowed_groups = settings_obj.get_allowed_groups()
-    
-    # Ruxsat tekshirish (case-insensitive)
-    if allowed_groups:
-        allowed_lower = [g.lower() for g in allowed_groups]
-        if group_name_lower not in allowed_lower:
-            raise Http404(f"'{group_name}' guruhiga ruxsat yo'q.")
-    
     # Bugungi kunni aniqlash
     today = datetime.date.today()
     day_of_week = today.isoweekday()  # 1-Dushanba ... 7-Yakshanba
     
     # Barcha darslarni olish (matching_group asl nomi bilan)
-    slots = TimetableSlot.objects.filter(group_name=matching_group).order_by('day_of_week', 'pair_number')
+    slots = TimetableSlot.objects.filter(group_name=matching_group).select_related('subject', 'teacher', 'room').order_by('day_of_week', 'pair_number')
     
     # Kunlarga bo'lish
     schedule_by_day = {}

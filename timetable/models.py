@@ -54,7 +54,7 @@ class Teacher(models.Model):
     full_name = models.CharField(max_length=200, verbose_name='To\'liq ism')
     degree = models.CharField(max_length=20, choices=DEGREE_CHOICES, verbose_name='Daraja')
     phone_number = models.CharField(max_length=20, unique=True, verbose_name='Telefon raqam')
-    telegram_id = models.BigIntegerField(null=True, blank=True, unique=True, verbose_name='Telegram ID')
+    telegram_id = models.BigIntegerField(null=True, blank=True, unique=True, db_index=True, verbose_name='Telegram ID')
     is_admin = models.BooleanField(default=False, verbose_name='Admin')
     is_superadmin = models.BooleanField(default=False, verbose_name='Superadmin')
     stavka = models.DecimalField(max_digits=3, decimal_places=2, default=1.0, verbose_name='Stavka (1 stavka = 20 soat/hafta)')
@@ -124,13 +124,13 @@ class TimetableSlot(models.Model):
         (6, 'Shanba'),
     ]
 
-    group_name = models.CharField(max_length=50, verbose_name='Guruh nomi')
+    group_name = models.CharField(max_length=50, db_index=True, verbose_name='Guruh nomi')
     subject = models.ForeignKey(Subject, on_delete=models.CASCADE, verbose_name='Fan')
     teacher = models.ForeignKey(Teacher, on_delete=models.CASCADE, verbose_name='O\'qituvchi')
     room = models.ForeignKey(Room, on_delete=models.CASCADE, verbose_name='Auditoriya')
     lesson_type = models.CharField(max_length=10, choices=LESSON_TYPE_CHOICES, verbose_name='Dars turi')
-    day_of_week = models.IntegerField(choices=DAY_OF_WEEK_CHOICES, verbose_name='Hafta kuni')
-    pair_number = models.IntegerField(verbose_name='Para raqami (1-5)')
+    day_of_week = models.IntegerField(choices=DAY_OF_WEEK_CHOICES, db_index=True, verbose_name='Hafta kuni')
+    pair_number = models.IntegerField(db_index=True, verbose_name='Para raqami (1-5)')
 
     class Meta:
         verbose_name = 'Jadval sloti'

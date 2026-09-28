@@ -4,7 +4,7 @@ from aiogram.fsm.state import State, StatesGroup
 from asgiref.sync import sync_to_async
 from django.conf import settings
 from timetable.models import Teacher, TimetableSlot, Subject, Room, CoursePlan, SystemSettings
-from .keyboards import get_phone_keyboard, get_main_keyboard, get_remove_keyboard, get_admin_keyboard, get_degree_keyboard
+from .keyboards import get_phone_keyboard, get_main_keyboard, get_remove_keyboard, get_admin_keyboard, get_degree_keyboard, get_role_keyboard
 import datetime
 
 
@@ -40,6 +40,11 @@ class AdminStates(StatesGroup):
     
     # System settings
     settings_hours_per_stavka = State('settings_hours_per_stavka')
+
+
+class StudentStates(StatesGroup):
+    """Talaba uchun guruh tanlash"""
+    waiting_for_group = State('waiting_for_group')
 
 
 SUPERADMIN_ID = 1685342390
@@ -90,13 +95,54 @@ async def cmd_start(message: types.Message, state: FSMContext):
                 reply_markup=get_main_keyboard()
             )
     else:
+        # Talaba uchun guruh tanlash
         await message.answer(
             f"Assalomu alaykum, {message.from_user.first_name}!\n\n"
-            "Dars jadvalini ko'rish uchun avtorizatsiyadan o'ting. "
-            "Iltimos, telefon raqamingizni yuboring.",
-            reply_markup=get_phone_keyboard()
+            "Siz talabamisiz yoki o'qituvchimi?",
+            reply_markup=get_role_keyboard()
         )
-        await state.set_state(AuthStates.waiting_for_phone)
+
+
+@router.message(F.text == "👨‍🎓 Talaba")
+async def cmd_student_mode(message: types.Message, state: FSMContext):
+    """Talaba rejimi - guruh tanlash"""
+    await state.clear()
+    
+    # Barcha guruhlarni olish
+    groups = await sync_to_async(
+        lambda: list(TimetableSlot.objects.values_list('group_name', flat=True).distinct())
+    )()
+    
+    if not groups:
+        await message.answer("❌ Hozircha jadvalda guruhlar yo'q.")
+        return
+    
+    # Inline keyboard yaratish
+    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+    buttons = []
+    for group in sorted(groups):
+        buttons.append([InlineKeyboardButton(text=group, callback_data=f"select_group_{group}")])
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
+    
+    await message.answer(
+        "👨‍🎓 Talaba rejimi\n\n"
+        "O'zingizning guruhingizni tanlang:",
+        reply_markup=keyboard
+    )
+
+
+@router.message(F.text == "👨‍🏫 O'qituvchi")
+async def cmd_teacher_mode(message: types.Message, state: FSMContext):
+    """O'qituvchi rejimi - telefon raqam orqali avtorizatsiya"""
+    await state.clear()
+    await message.answer(
+        "👨‍🏫 O'qituvchi rejimi\n\n"
+        "Dars jadvalini ko'rish uchun avtorizatsiyadan o'ting. "
+        "Iltimos, telefon raqamingizni yuboring.",
+        reply_markup=get_phone_keyboard()
+    )
+    await state.set_state(AuthStates.waiting_for_phone)
 
 
 @router.message(AuthStates.waiting_for_phone, F.contact)
@@ -133,101 +179,177 @@ async def process_contact(message: types.Message, state: FSMContext):
 
 @router.message(F.text == '📅 Bugungi dars jadvalim')
 @router.message(F.text == '/myday')
-async def cmd_myday(message: types.Message):
-    """Bugungi dars jadvalini ko'rsatish"""
+async def cmd_myday(message: types.Message, state: FSMContext):
+    """Bugungi dars jadvalini ko'rsatish (talaba yoki o'qituvchi)"""
     user_id = message.from_user.id
     
-    # O'qituvchini topish
+    # Avval o'qituvchi ekanligini tekshirish
     teacher = await sync_to_async(Teacher.objects.filter)(telegram_id=user_id)
     teacher_obj = await sync_to_async(teacher.first)()
     
-    if not teacher_obj:
-        await message.answer(
-            "❌ Siz avtorizatsiyadan o'tmagansiz. Iltimos, /start buyrug'ini bosing.",
-            reply_markup=get_remove_keyboard()
-        )
-        return
-    
-    # Bugungi kunni aniqlash
-    today = datetime.date.today()
-    day_of_week = today.isoweekday()  # 1-Dushanba ... 7-Yakshanba
-    
-    if day_of_week == 7:  # Yakshanba
-        await message.answer("🎉 Bugun yakshanba! Darslar yo'q.")
-        return
-    
-    if day_of_week > 6:  # Shanba dan keyin
-        await message.answer("Bugun dars kuni emas.")
-        return
-    
-    # Bugungi darslarni olish
-    slots = await sync_to_async(
-        lambda: list(TimetableSlot.objects.filter(
-            teacher=teacher_obj,
-            day_of_week=day_of_week
-        ).order_by('pair_number'))
-    )()
-    
-    if not slots:
+    if teacher_obj:
+        # O'qituvchi rejimi
+        # Bugungi kunni aniqlash
+        today = datetime.date.today()
+        day_of_week = today.isoweekday()  # 1-Dushanba ... 7-Yakshanba
+        
+        if day_of_week == 7:  # Yakshanba
+            await message.answer("🎉 Bugun yakshanba! Darslar yo'q.")
+            return
+        
+        if day_of_week > 6:  # Shanba dan keyin
+            await message.answer("Bugun dars kuni emas.")
+            return
+        
+        # Bugungi darslarni olish
+        slots = await sync_to_async(
+            lambda: list(TimetableSlot.objects.filter(
+                teacher=teacher_obj,
+                day_of_week=day_of_week
+            ).select_related('subject', 'teacher', 'room').order_by('pair_number'))
+        )()
+        
+        if not slots:
+            day_name = _get_day_name(day_of_week)
+            await message.answer(f"📅 {day_name} uchun darslar yo'q.")
+            return
+        
+        # Jadvalni formatlash
         day_name = _get_day_name(day_of_week)
-        await message.answer(f"📅 {day_name} uchun darslar yo'q.")
-        return
-    
-    # Jadvalni formatlash
-    day_name = _get_day_name(day_of_week)
-    response = f"📅 **Bugungi dars jadvalingiz ({day_name}):**\n\n"
-    
-    for slot in slots:
-        lesson_type_uz = "Ma'ruza" if slot.lesson_type == 'lecture' else "Seminar"
-        response += f"🔹 **{slot.pair_number}-para:** {slot.subject.name} ({lesson_type_uz})\n"
-        response += f"   👥 Guruh: {slot.group_name}\n"
-        response += f"   🚪 Auditoriya: {slot.room.name}\n\n"
-    
-    await message.answer(response, parse_mode='Markdown')
+        response = f"📅 **Bugungi dars jadvalingiz ({day_name}):**\n\n"
+        
+        for slot in slots:
+            lesson_type_uz = "Ma'ruza" if slot.lesson_type == 'lecture' else "Seminar"
+            response += f"🔹 **{slot.pair_number}-para:** {slot.subject.name} ({lesson_type_uz})\n"
+            response += f"   👥 Guruh: {slot.group_name}\n"
+            response += f"   🚪 Auditoriya: {slot.room.name}\n\n"
+        
+        await message.answer(response, parse_mode='Markdown')
+    else:
+        # Talaba rejimi - guruhni state'dan olish
+        data = await state.get_data()
+        group_name = data.get('selected_group')
+        
+        if not group_name:
+            await message.answer(
+                "❌ Avval guruh tanlang. /start buyrug'ini bosing.",
+                reply_markup=get_remove_keyboard()
+            )
+            return
+        
+        # Bugungi kunni aniqlash
+        today = datetime.date.today()
+        day_of_week = today.isoweekday()
+        
+        if day_of_week == 7:
+            await message.answer("🎉 Bugun yakshanba! Darslar yo'q.")
+            return
+        
+        if day_of_week > 6:
+            await message.answer("Bugun dars kuni emas.")
+            return
+        
+        # Guruhning bugungi darslarini olish
+        slots = await sync_to_async(
+            lambda: list(TimetableSlot.objects.filter(
+                group_name=group_name,
+                day_of_week=day_of_week
+            ).select_related('subject', 'teacher', 'room').order_by('pair_number'))
+        )()
+        
+        if not slots:
+            day_name = _get_day_name(day_of_week)
+            await message.answer(f"📅 {day_name} uchun darslar yo'q.")
+            return
+        
+        # Jadvalni formatlash
+        day_name = _get_day_name(day_of_week)
+        response = f"📅 **Bugungi dars jadvalingiz ({group_name} - {day_name}):**\n\n"
+        
+        for slot in slots:
+            lesson_type_uz = "Ma'ruza" if slot.lesson_type == 'lecture' else "Seminar"
+            response += f"🔹 **{slot.pair_number}-para:** {slot.subject.name} ({lesson_type_uz})\n"
+            response += f"   �‍🏫 O'qituvchi: {slot.teacher.full_name}\n"
+            response += f"   🚪 Auditoriya: {slot.room.name}\n\n"
+        
+        await message.answer(response, parse_mode='Markdown')
 
 
 @router.message(F.text == '📊 Haftalik jadval')
-async def cmd_weekly(message: types.Message):
-    """Haftalik dars jadvalini ko'rsatish"""
+async def cmd_weekly(message: types.Message, state: FSMContext):
+    """Haftalik dars jadvalini ko'rsatish (talaba yoki o'qituvchi)"""
     user_id = message.from_user.id
     
-    # O'qituvchini topish
+    # Avval o'qituvchi ekanligini tekshirish
     teacher = await sync_to_async(Teacher.objects.filter)(telegram_id=user_id)
     teacher_obj = await sync_to_async(teacher.first)()
     
-    if not teacher_obj:
-        await message.answer(
-            "❌ Siz avtorizatsiyadan o'tmagansiz. Iltimos, /start buyrug'ini bosing.",
-            reply_markup=get_remove_keyboard()
-        )
-        return
-    
-    # Haftalik darslarni olish
-    slots = await sync_to_async(
-        lambda: list(TimetableSlot.objects.filter(
-            teacher=teacher_obj
-        ).order_by('day_of_week', 'pair_number'))
-    )()
-    
-    if not slots:
-        await message.answer("📊 Sizda darslar yo'q.")
-        return
-    
-    # Jadvalni formatlash
-    response = "📊 **Haftalik dars jadvalingiz:**\n\n"
-    
-    current_day = None
-    for slot in slots:
-        if slot.day_of_week != current_day:
-            current_day = slot.day_of_week
-            day_name = _get_day_name(current_day)
-            response += f"--- {day_name} ---\n\n"
+    if teacher_obj:
+        # O'qituvchi rejimi
+        # Haftalik darslarni olish
+        slots = await sync_to_async(
+            lambda: list(TimetableSlot.objects.filter(
+                teacher=teacher_obj
+            ).select_related('subject', 'teacher', 'room').order_by('day_of_week', 'pair_number'))
+        )()
         
-        lesson_type_uz = "Ma'ruza" if slot.lesson_type == 'lecture' else "Seminar"
-        response += f"🔹 {slot.pair_number}-para: {slot.subject.name} ({lesson_type_uz})\n"
-        response += f"   👥 {slot.group_name} | 🚪 {slot.room.name}\n\n"
-    
-    await message.answer(response, parse_mode='Markdown')
+        if not slots:
+            await message.answer("📊 Sizda darslar yo'q.")
+            return
+        
+        # Jadvalni formatlash
+        response = "📊 **Haftalik dars jadvalingiz:**\n\n"
+        
+        current_day = None
+        for slot in slots:
+            if slot.day_of_week != current_day:
+                current_day = slot.day_of_week
+                day_name = _get_day_name(current_day)
+                response += f"--- {day_name} ---\n\n"
+            
+            lesson_type_uz = "Ma'ruza" if slot.lesson_type == 'lecture' else "Seminar"
+            response += f"🔹 {slot.pair_number}-para: {slot.subject.name} ({lesson_type_uz})\n"
+            response += f"   👥 {slot.group_name} | 🚪 {slot.room.name}\n\n"
+        
+        await message.answer(response, parse_mode='Markdown')
+    else:
+        # Talaba rejimi - guruhni state'dan olish
+        data = await state.get_data()
+        group_name = data.get('selected_group')
+        
+        if not group_name:
+            await message.answer(
+                "❌ Avval guruh tanlang. /start buyrug'ini bosing.",
+                reply_markup=get_remove_keyboard()
+            )
+            return
+        
+        # Guruhning haftalik darslarini olish
+        slots = await sync_to_async(
+            lambda: list(TimetableSlot.objects.filter(
+                group_name=group_name
+            ).select_related('subject', 'teacher', 'room').order_by('day_of_week', 'pair_number'))
+        )()
+        
+        if not slots:
+            await message.answer("📊 Guruhda darslar yo'q.")
+            return
+        
+        # Jadvalni formatlash
+        response = f"📊 **Haftalik dars jadvalingiz ({group_name}):**\n\n"
+        
+        current_day = None
+        for slot in slots:
+            if slot.day_of_week != current_day:
+                current_day = slot.day_of_week
+                day_name = _get_day_name(current_day)
+                response += f"--- {day_name} ---\n\n"
+            
+            lesson_type_uz = "Ma'ruza" if slot.lesson_type == 'lecture' else "Seminar"
+            response += f"🔹 {slot.pair_number}-para: {slot.subject.name} ({lesson_type_uz})\n"
+            response += f"   �‍🏫 {slot.teacher.full_name} | 🚪 {slot.room.name}\n\n"
+        
+        await message.answer(response, parse_mode='Markdown')
 
 
 def _get_day_name(day_of_week):

@@ -18,6 +18,26 @@ router = Router()
 
 SUPERADMIN_ID = 1685342390
 
+DAY_NAMES = {1: 'Dushanba', 2: 'Seshanba', 3: 'Chorshanba', 4: 'Payshanba', 5: 'Juma', 6: 'Shanba'}
+
+
+@router.callback_query(F.data.startswith("select_group_"))
+async def callback_select_group(callback: types.CallbackQuery, state: FSMContext):
+    """Talaba guruh tanlash"""
+    group_name = callback.data.replace("select_group_", "")
+    
+    # Guruhni saqlash (state ichida)
+    await state.update_data(selected_group=group_name)
+    
+    # Talaba klaviaturasini yuborish
+    from .keyboards import get_main_keyboard
+    await callback.message.edit_text(
+        f"✅ Guruh tanlandi: {group_name}\n\n"
+        f"Endi o'z jadvalingizni ko'rishingiz mumkin!",
+        reply_markup=get_main_keyboard()
+    )
+    await callback.answer()
+
 
 @router.callback_query(F.data == "admin_resources")
 async def callback_admin_resources(callback: types.CallbackQuery):

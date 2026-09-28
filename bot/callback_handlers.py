@@ -29,9 +29,9 @@ async def callback_select_group(callback: types.CallbackQuery, state: FSMContext
     # Guruhni saqlash (state ichida)
     await state.update_data(selected_group=group_name)
     
-    # Talaba klaviaturasini yuborish
+    # Talaba klaviaturasini yuborish (yangi message)
     from .keyboards import get_main_keyboard
-    await callback.message.edit_text(
+    await callback.message.answer(
         f"✅ Guruh tanlandi: {group_name}\n\n"
         f"Endi o'z jadvalingizni ko'rishingiz mumkin!",
         reply_markup=get_main_keyboard()

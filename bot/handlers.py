@@ -352,6 +352,102 @@ async def cmd_weekly(message: types.Message, state: FSMContext):
         await message.answer(response, parse_mode='Markdown')
 
 
+@router.message(F.text == "📥 Jadval yuklab olish")
+async def cmd_export(message: types.Message, state: FSMContext):
+    """Jadval yuklab olish (talaba yoki o'qituvchi)"""
+    user_id = message.from_user.id
+    
+    # Avval o'qituvchi ekanligini tekshirish
+    teacher = await sync_to_async(Teacher.objects.filter)(telegram_id=user_id)
+    teacher_obj = await sync_to_async(teacher.first)()
+    
+    if teacher_obj:
+        # O'qituvchi rejimi - o'z jadvalini yuklab olish
+        # Web link yuborish (chunki PDF/CSV generatsiya web view orqali amalga oshiriladi)
+        await message.answer(
+            "📥 Jadval yuklab olish\n\n"
+            "Jadvalni yuklab olish uchun web saytdan foydalaning:\n"
+            "http://localhost:8000/schedule/all/\n\n"
+            "Yoki admin panel orqali export qiling.",
+            reply_markup=get_remove_keyboard()
+        )
+    else:
+        # Talaba rejimi - guruh tanlash
+        data = await state.get_data()
+        group_name = data.get('selected_group')
+        
+        if not group_name:
+            await message.answer(
+                "❌ Avval guruh tanlang. /start buyrug'ini bosing.",
+                reply_markup=get_remove_keyboard()
+            )
+            return
+        
+        # Guruh jadvalini yuklab olish uchun web link yuborish
+        await message.answer(
+            f"📥 {group_name} guruh jadvalini yuklab olish\n\n"
+            f"CSV: http://localhost:8000/schedule/{group_name}/?format=csv\n"
+            f"PDF: http://localhost:8000/schedule/{group_name}/?format=pdf\n\n"
+            "Yoki admin panel orqali export qiling.",
+            reply_markup=get_remove_keyboard()
+        )
+
+
+@router.message(F.text == "📊 Statistika")
+async def cmd_statistics(message: types.Message):
+    """Statistika ko'rish (superadmin)"""
+    if message.from_user.id != SUPERADMIN_ID:
+        await message.answer("❌ Bu amal faqat superadmin uchun.")
+        return
+    
+    # Statistikani olish
+    teachers_count = await sync_to_async(Teacher.objects.count)()
+    subjects_count = await sync_to_async(Subject.objects.count)()
+    rooms_count = await sync_to_async(Room.objects.count)()
+    groups_count = await sync_to_async(
+        lambda: TimetableSlot.objects.values_list('group_name', flat=True).distinct().count()
+    )()
+    slots_count = await sync_to_async(TimetableSlot.objects.count)()
+    course_plans_count = await sync_to_async(CoursePlan.objects.count)()
+    
+    response = "📊 **Tizim statistikasi:**\n\n"
+    response += f"👨‍🏫 O'qituvchilar: {teachers_count} ta\n"
+    response += f"📚 Fanlar: {subjects_count} ta\n"
+    response += f"🚪 Auditoriyalar: {rooms_count} ta\n"
+    response += f"👥 Guruhlar: {groups_count} ta\n"
+    response += f"📝 O'quv rejalari: {course_plans_count} ta\n"
+    response += f"📅 Jadval slotlari: {slots_count} ta\n"
+    
+    await message.answer(response, parse_mode='Markdown')
+
+
+@router.message(F.text == "🔄 Jadval yangilash")
+async def cmd_regenerate_schedule(message: types.Message):
+    """Jadvalni yangilash (superadmin)"""
+    if message.from_user.id != SUPERADMIN_ID:
+        await message.answer("❌ Bu amal faqat superadmin uchun.")
+        return
+    
+    await message.answer("🔄 Jadval yangilanmoqda...")
+    
+    # Jadval generatsiyasini ishga tushirish
+    import subprocess
+    try:
+        result = subprocess.run(
+            ['python', 'manage.py', 'generate_schedule'],
+            capture_output=True,
+            text=True,
+            cwd='d:/smartscheduler'
+        )
+        
+        if result.returncode == 0:
+            await message.answer("✅ Jadval muvaffaqiyatli yangilandi!")
+        else:
+            await message.answer(f"❌ Xatolik: {result.stderr}")
+    except Exception as e:
+        await message.answer(f"❌ Xatolik: {str(e)}")
+
+
 def _get_day_name(day_of_week):
     """Hafta kunini o'zbekcha nomini qaytarish"""
     days = {

@@ -15,12 +15,12 @@
         <div class="flex gap-3">
             <a href="{% url 'group_schedule' group_name %}?format=csv" 
                class="inline-flex items-center gap-2 px-5 py-3 bg-gradient-to-r from-green-500 to-emerald-600 text-white rounded-xl font-semibold hover:from-green-600 hover:to-emerald-700 transition-all duration-300 transform hover:scale-105 shadow-lg">
-                <span class="text-xl">📄</span>
+                <span class="text-xl animate-pulse-slow">📄</span>
                 <span>CSV</span>
             </a>
             <a href="{% url 'group_schedule' group_name %}?format=pdf" 
                class="inline-flex items-center gap-2 px-5 py-3 bg-gradient-to-r from-red-500 to-pink-600 text-white rounded-xl font-semibold hover:from-red-600 hover:to-pink-700 transition-all duration-300 transform hover:scale-105 shadow-lg">
-                <span class="text-xl">📄</span>
+                <span class="text-xl animate-pulse-slow">📄</span>
                 <span>PDF</span>
             </a>
         </div>
@@ -28,12 +28,12 @@
     
     <!-- Title Card -->
     <div class="glass-effect rounded-3xl shadow-2xl overflow-hidden mb-8 card-hover">
-        <div class="bg-gradient-to-r from-purple-600 to-pink-600 px-8 py-8">
+        <div class="bg-gradient-to-r from-blue-600 to-indigo-600 px-8 py-8">
             <div class="flex items-center gap-4">
                 <div class="text-5xl animate-float">📖</div>
                 <div>
                     <h1 class="text-4xl font-bold text-white mb-2">{{ group_name }} Guruh Jadvali</h1>
-                    <p class="text-purple-100 text-lg">Haftalik dars jadvali</p>
+                    <p class="text-blue-100 text-lg">Haftalik dars jadvali</p>
                 </div>
             </div>
         </div>
@@ -42,18 +42,18 @@
     <!-- Schedule Cards -->
     <div class="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
         {% for day_schedule in schedule_data %}
-        <div class="glass-effect rounded-2xl shadow-xl overflow-hidden card-hover {% if day_schedule.day_num == today %}ring-4 ring-purple-400 ring-opacity-50{% endif %}">
+        <div class="glass-effect rounded-2xl shadow-xl overflow-hidden card-hover {% if day_schedule.day_num == today %}ring-4 ring-blue-400 ring-opacity-50{% endif %}">
             <!-- Day Header -->
-            <div class="bg-gradient-to-r {% if day_schedule.day_num == today %}from-purple-600 to-pink-600{% else %}from-gray-700 to-gray-800{% endif %} px-6 py-4">
+            <div class="bg-gradient-to-r {% if day_schedule.day_num == today %}from-blue-600 to-indigo-600{% else %}from-gray-700 to-gray-800{% endif %} px-6 py-4">
                 <div class="flex items-center justify-between">
                     <div class="flex items-center gap-3">
-                        <span class="text-3xl">
+                        <span class="text-3xl animate-float inline-block">
                             {% if day_schedule.day_num == today %}📅{% else %}📆{% endif %}
                         </span>
                         <h2 class="text-2xl font-bold text-white">{{ day_schedule.day_name }}</h2>
                     </div>
                     {% if day_schedule.day_num == today %}
-                    <span class="px-3 py-1 bg-white text-purple-600 rounded-full text-sm font-bold">Bugun</span>
+                    <span class="px-3 py-1 bg-white text-blue-600 rounded-full text-sm font-bold animate-pulse-slow">Bugun</span>
                     {% endif %}
                 </div>
             </div>
@@ -61,17 +61,17 @@
             <!-- Slots -->
             <div class="p-6 space-y-4">
                 {% for slot in day_schedule.slots %}
-                <div class="bg-white rounded-xl p-4 border-l-4 {% if slot.lesson_type == 'lecture' %}border-purple-500{% else %}border-pink-500{% endif %} hover:shadow-lg transition-all duration-300 transform hover:translate-x-1">
+                <div class="bg-white rounded-xl p-4 border-l-4 {% if slot.lesson_type == 'lecture' %}border-blue-500{% else %}border-indigo-500{% endif %} hover:shadow-lg transition-all duration-300 transform hover:translate-x-1">
                     <div class="flex items-center justify-between mb-3">
-                        <span class="text-2xl font-bold {% if slot.lesson_type == 'lecture' %}text-purple-600{% else %}text-pink-600{% endif %}">{{ slot.pair_number }}-para</span>
-                        <span class="px-3 py-1 rounded-full text-sm font-semibold {% if slot.lesson_type == 'lecture' %}bg-purple-100 text-purple-700{% else %}bg-pink-100 text-pink-700{% endif %}">
+                        <span class="text-2xl font-bold {% if slot.lesson_type == 'lecture' %}text-blue-600{% else %}text-indigo-600{% endif %}">{{ slot.pair_number }}-para</span>
+                        <span class="px-3 py-1 rounded-full text-sm font-semibold {% if slot.lesson_type == 'lecture' %}bg-blue-100 text-blue-700{% else %}bg-indigo-100 text-indigo-700{% endif %}">
                             {% if slot.lesson_type == 'lecture' %}Ma'ruza{% else %}Seminar{% endif %}
                         </span>
                     </div>
                     
                     <div class="space-y-2">
                         <div class="flex items-center gap-2 text-gray-700">
-                            <span class="text-lg">📚</span>
+                            <span class="text-lg animate-pulse-slow">📚</span>
                             <span class="font-semibold">{{ slot.subject.name }}</span>
                         </div>
                         <div class="flex items-center gap-2 text-gray-600">
@@ -79,7 +79,7 @@
                             <span class="text-sm">{{ slot.teacher.full_name }}</span>
                         </div>
                         <div class="flex items-center gap-2 text-gray-600">
-                            <span>�</span>
+                            <span>🚪</span>
                             <span class="text-sm">{{ slot.room.name }}</span>
                         </div>
                     </div>
@@ -88,7 +88,7 @@
                 
                 {% if not day_schedule.slots %}
                 <div class="text-center py-8 text-gray-400">
-                    <div class="text-4xl mb-2">😴</div>
+                    <div class="text-4xl mb-2 animate-float">😴</div>
                     <p class="text-sm">Darslar yo'q</p>
                 </div>
                 {% endif %}
@@ -100,7 +100,16 @@
     <!-- Footer -->
     <div class="mt-12 text-center">
         <div class="glass-effect rounded-2xl p-6 inline-block">
-            <p class="text-purple-200 text-sm">© 2026 Smart Timetable. Barcha huquqlar himoyalangan.</p>
+            <p class="text-blue-200 text-sm">© 2026 Smart Timetable. Barcha huquqlar himoyalangan.</p>
+            <div class="mt-2 flex justify-center gap-4">
+                <a href="https://t.me/darsmakerbot" target="_blank" class="text-blue-300 hover:text-white transition-colors text-sm flex items-center gap-1">
+                    <span class="animate-pulse-slow">🤖</span> Telegram Bot
+                </a>
+                <span class="text-blue-400">•</span>
+                <a href="/admin" class="text-blue-300 hover:text-white transition-colors text-sm flex items-center gap-1">
+                    <span class="animate-spin-slow">⚙️</span> Admin Panel
+                </a>
+            </div>
         </div>
     </div>
 </div>

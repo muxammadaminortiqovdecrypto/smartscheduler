@@ -24,6 +24,7 @@ def get_main_keyboard():
         [KeyboardButton(text="📅 Bugungi dars jadvalim")],
         [KeyboardButton(text="📊 Haftalik jadval")],
         [KeyboardButton(text="📥 Jadval yuklab olish")],
+        [KeyboardButton(text="🔙 Orqaga")],
     ]
     keyboard = ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
     return keyboard
@@ -35,6 +36,7 @@ def get_teacher_keyboard():
         [KeyboardButton(text="📅 Bugungi dars jadvalim")],
         [KeyboardButton(text="📊 Haftalik jadval")],
         [KeyboardButton(text="📥 Jadval yuklab olish")],
+        [KeyboardButton(text="🔙 Orqaga")],
     ]
     keyboard = ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
     return keyboard
@@ -47,6 +49,7 @@ def get_admin_keyboard():
         [KeyboardButton(text="📊 Haftalik jadval")],
         [KeyboardButton(text="📥 Jadval yuklab olish")],
         [KeyboardButton(text="⚙️ Admin panel")],
+        [KeyboardButton(text="🔙 Orqaga")],
     ]
     keyboard = ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
     return keyboard
@@ -62,6 +65,7 @@ def get_superadmin_keyboard():
         [KeyboardButton(text="🔧 Tizim optimizatsiyasi")],
         [KeyboardButton(text="📊 Statistika")],
         [KeyboardButton(text="🔄 Jadval yangilash")],
+        [KeyboardButton(text="🔙 Orqaga")],
     ]
     keyboard = ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
     return keyboard

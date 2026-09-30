@@ -393,6 +393,15 @@ async def cmd_export(message: types.Message, state: FSMContext):
         )
 
 
+@router.message(F.text == "🔙 Orqaga")
+async def cmd_back(message: types.Message):
+    """Orqaga qaytish"""
+    await message.answer(
+        "🏠 Bosh menyu",
+        reply_markup=get_role_keyboard()
+    )
+
+
 @router.message(F.text == "📊 Statistika")
 async def cmd_statistics(message: types.Message):
     """Statistika ko'rish (superadmin)"""

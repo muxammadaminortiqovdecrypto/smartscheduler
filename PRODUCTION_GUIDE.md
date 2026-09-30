@@ -49,10 +49,18 @@ python manage.py collectstatic --noinput
 python manage.py createsuperuser
 ```
 
-### 7. Gunicorn Setup
+### 7. Web Server Setup
+
+#### Linux (Gunicorn)
 ```bash
 pip install gunicorn
 gunicorn smartscheduler.wsgi:application --bind 0.0.0.0:8000
+```
+
+#### Windows (Waitress)
+```bash
+pip install waitress
+waitress-serve --port=8000 smartscheduler.wsgi:application
 ```
 
 ### 8. Nginx Configuration

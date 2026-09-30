@@ -19,10 +19,10 @@
     </div>
     
     <!-- Search Form -->
-    <div class="glass-effect rounded-3xl shadow-2xl p-8 mb-8 card-hover">
+    <div class="glass-effect rounded-3xl shadow-2xl p-8 mb-8 card-hover neon-border">
         <div class="flex items-center gap-3 mb-6">
             <span class="text-3xl animate-spin-slow inline-block">🔍</span>
-            <h2 class="text-2xl font-bold text-gray-800">Guruhni qidiring</h2>
+            <h2 class="text-2xl font-bold text-gray-800 text-shadow">Guruhni qidiring</h2>
         </div>
         <form action="{% url 'group_schedule' 'KI-210' %}" method="get" id="searchForm">
             <div class="flex gap-4">
@@ -43,7 +43,7 @@
                 </div>
                 <button 
                     type="submit" 
-                    class="px-8 py-4 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-2xl font-bold hover:from-blue-700 hover:to-indigo-700 transition-all duration-300 transform hover:scale-105 shadow-lg flex items-center gap-2"
+                    class="px-8 py-4 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-2xl font-bold hover:from-blue-700 hover:to-indigo-700 transition-all duration-300 transform hover:scale-105 shadow-lg flex items-center gap-2 glow-effect ripple"
                 >
                     <span>Qidirish</span>
                     <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -55,11 +55,11 @@
     </div>
     
     <!-- Group Cards -->
-    <div class="glass-effect rounded-3xl shadow-2xl p-8 card-hover">
+    <div class="glass-effect rounded-3xl shadow-2xl p-8 card-hover neon-border">
         <div class="flex items-center gap-3 mb-8">
             <span class="text-3xl animate-float inline-block">👥</span>
-            <h2 class="text-2xl font-bold text-gray-800">Guruhlar ro'yxati</h2>
-            <span class="ml-auto px-4 py-2 bg-blue-100 text-blue-700 rounded-full text-sm font-semibold">
+            <h2 class="text-2xl font-bold text-gray-800 text-shadow">Guruhlar ro'yxati</h2>
+            <span class="ml-auto px-4 py-2 bg-blue-100 text-blue-700 rounded-full text-sm font-semibold shimmer">
                 {{ groups|length }} ta guruh
             </span>
         </div>
@@ -68,10 +68,11 @@
         <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
             {% for group in groups %}
             <a href="{% url 'group_schedule' group %}" 
-               class="block bg-gradient-to-br from-blue-600 to-indigo-600 text-white rounded-2xl p-6 hover:from-blue-700 hover:to-indigo-700 transition-all duration-300 transform hover:scale-105 shadow-xl card-hover group">
-                <div class="text-center">
+               class="block bg-gradient-to-br from-blue-600 to-indigo-600 text-white rounded-2xl p-6 hover:from-blue-700 hover:to-indigo-700 transition-all duration-300 transform hover:scale-105 shadow-xl card-hover group relative overflow-hidden">
+                <div class="absolute inset-0 shimmer"></div>
+                <div class="relative z-10 text-center">
                     <div class="text-4xl mb-3 group-hover:scale-110 transition-transform duration-300 animate-pulse-slow">📖</div>
-                    <div class="text-xl font-bold">{{ group }}</div>
+                    <div class="text-xl font-bold text-shadow">{{ group }}</div>
                     <div class="mt-2 text-sm text-blue-100 opacity-0 group-hover:opacity-100 transition-opacity duration-300">
                         Jadvalni ko'rish →
                     </div>
@@ -90,14 +91,14 @@
     
     <!-- Footer -->
     <div class="mt-12 text-center">
-        <div class="glass-effect rounded-2xl p-6 inline-block">
-            <p class="text-blue-200 text-sm">© 2026 Smart Timetable. Barcha huquqlar himoyalangan.</p>
+        <div class="glass-effect rounded-2xl p-6 inline-block neon-border">
+            <p class="text-blue-200 text-sm text-shadow">© 2026 Smart Timetable. Barcha huquqlar himoyalangan.</p>
             <div class="mt-2 flex justify-center gap-4">
-                <a href="https://t.me/darsmakerbot" target="_blank" class="text-blue-300 hover:text-white transition-colors text-sm flex items-center gap-1">
+                <a href="https://t.me/darsmakerbot" target="_blank" class="text-blue-300 hover:text-white transition-colors text-sm flex items-center gap-1 glow-effect">
                     <span class="animate-pulse-slow">🤖</span> Telegram Bot
                 </a>
                 <span class="text-blue-400">•</span>
-                <a href="/admin" class="text-blue-300 hover:text-white transition-colors text-sm flex items-center gap-1">
+                <a href="/admin" class="text-blue-300 hover:text-white transition-colors text-sm flex items-center gap-1 glow-effect">
                     <span class="animate-spin-slow">⚙️</span> Admin Panel
                 </a>
             </div>

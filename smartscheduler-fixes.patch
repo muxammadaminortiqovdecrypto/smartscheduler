@@ -1,0 +1,1625 @@
+diff --git a/timetable/management/commands/analyze_schedule.py b/timetable/management/commands/analyze_schedule.py
+index 84c92a5..4f18ebf 100644
+--- a/timetable/management/commands/analyze_schedule.py
++++ b/timetable/management/commands/analyze_schedule.py
+@@ -1,141 +1,161 @@
+-from django.core.management.base import BaseCommand
+-from timetable.models import Teacher, TimetableSlot, CoursePlan, Room
+ from collections import defaultdict
+ 
++from django.core.management.base import BaseCommand
++from django.db import transaction
++
++from timetable.management.commands.generate_schedule import build_problem, DAY_NAMES
++from timetable.models import TimetableSlot
++from timetable.scheduler import Solver, DAYS, PAIRS
++
+ 
+ class Command(BaseCommand):
+-    help = 'Analyze schedule and provide optimization suggestions for superadmin'
++    help = "Jadvalni tekshirish (majburiy qoidalar), sifatini baholash va tasdiqlangan optimallashtirish takliflari"
++
++    def add_arguments(self, parser):
++        parser.add_argument('--apply', action='store_true', help="Topilgan yaxshilanishlarni qo'llash")
++        parser.add_argument('--top', type=int, default=10)
++
++    def handle(self, *args, **o):
++        lessons, teachers, rooms = build_problem()
++        slots = list(TimetableSlot.objects.select_related('subject', 'teacher', 'room'))
++        if not slots:
++            return self.stdout.write(self.style.WARNING("Jadval bo'sh. Avval generate_schedule ni ishga tushiring."))
++
++        # DB slotlarini solver holatiga moslashtirish (plan + tur bo'yicha)
++        pool = defaultdict(list)
++        for l in lessons:
++            pool[(l.group, l.subject, l.teacher, l.kind)].append(l)
++        s = Solver(lessons, teachers, rooms)
++        db_id, extra = {}, []
++        for sl in slots:
++            bucket = pool[(sl.group_name, sl.subject_id, sl.teacher_id, sl.lesson_type)]
++            if bucket:
++                l = bucket.pop()
++                s.place(l, sl.day_of_week, sl.pair_number, sl.room_id)
++                db_id[l.id] = sl.id
++            else:
++                extra.append(sl)
++
++        # 1. MAJBURIY QOIDALAR
++        self.stdout.write(self.style.MIGRATE_HEADING('=== 1. MAJBURIY QOIDALAR ==='))
++        errors = 0
++        for l in s.unplaced():
++            errors += 1
++            self.stdout.write(self.style.ERROR(f'❌ Rejadagi dars joylashmagan: {l.group}, fan#{l.subject}, {l.kind}'))
++        for sl in extra:
++            errors += 1
++            self.stdout.write(self.style.ERROR(f'❌ Rejada yo\'q dars: {sl}'))
++        by_teacher = defaultdict(int)
++        for sl in slots:
++            by_teacher[sl.teacher] += 1
++        for t, n in by_teacher.items():
++            if n > teachers[t.id].cap:
++                errors += 1
++                self.stdout.write(self.style.ERROR(f'❌ {t.full_name}: {n} soat > stavka limiti {teachers[t.id].cap}'))
++        for l in s.lessons.values():
++            if l.id not in s.assign:
++                continue
++            d, p, room = s.assign[l.id]
++            s.unplace(l)
++            ok = s.hard_ok(l, d, p)
++            s.place(l, d, p, room)
++            if not ok:
++                errors += 1
++                self.stdout.write(self.style.ERROR(
++                    f'❌ Qoida buzilgan: {l.group} {DAY_NAMES[d]} {p}-para ({l.kind}) - kunlik limit/tanaffus/ma\'ruza tartibi'))
++        self.stdout.write(self.style.SUCCESS('✅ Barcha majburiy qoidalar bajarilgan') if not errors else f'Jami xatolar: {errors}')
++
++        # 2. SIFAT
++        self.stdout.write(self.style.MIGRATE_HEADING('\n=== 2. SIFAT KO\'RSATKICHLARI ==='))
++        g_windows = defaultdict(int)
++        for g, days in s.gb.items():
++            for d, ps in days.items():
++                if ps:
++                    g_windows[g] += (max(ps) - min(ps) + 1) - len(ps)
++        t_windows = defaultdict(int)
++        for t, days in s.tb.items():
++            for d, ps in days.items():
++                if ps:
++                    t_windows[t] += (max(ps) - min(ps) + 1) - len(ps)
++        for g, w in sorted(g_windows.items()):
++            if w:
++                self.stdout.write(f'⚠️  {g}: {w} ta "oyna" (darslar orasida bo\'sh para)')
++        for t, w in t_windows.items():
++            if w:
++                self.stdout.write(f'⚠️  {teachers_name(slots, t)}: {w} ta oyna')
++        for g, days in sorted(s.gb.items()):
++            for d, ps in days.items():
++                if len(ps) > 4:
++                    self.stdout.write(f'⚠️  {g}: {DAY_NAMES[d]} - {len(ps)} para (4 tadan ko\'p)')
++        if not any(g_windows.values()) and not any(t_windows.values()):
++            self.stdout.write('✅ Oynalar yo\'q')
++
++        self.stdout.write(self.style.MIGRATE_HEADING('\n=== 3. XONALAR BANDLIGI ==='))
++        total = len(DAYS) * len(PAIRS)
++        used = defaultdict(int)
++        for sl in slots:
++            used[sl.room.name] += 1
++        for name, n in sorted(used.items(), key=lambda x: -x[1]):
++            pct = 100 * n / total
++            mark = '⚠️ ' if pct > 80 else ('💤' if pct < 20 else '✅')
++            self.stdout.write(f'{mark} {name}: {n}/{total} ({pct:.0f}%)')
++
++        # 4. TASDIQLANGAN TAKLIFLAR: har biri haqiqatan mumkin va jarimani kamaytiradi
++        self.stdout.write(self.style.MIGRATE_HEADING('\n=== 4. TASDIQLANGAN YAXSHILANISHLAR ==='))
++        before_total = s.total_cost()
++        applied = []
++        for _ in range(200):
++            best = None
++            for lid in list(s.assign):
++                l = s.lessons[lid]
++                old = s.assign[lid]
++                base = s._local(l)
++                s.unplace(l)
++                for d, p, room in s.candidates(l):
++                    if (d, p) == old[:2]:
++                        continue
++                    s.place(l, d, p, room)
++                    gain = base - s._local(l)
++                    s.unplace(l)
++                    if gain > 0.01 and (best is None or gain > best[0]):
++                        best = (gain, l, old, (d, p, room))
++                s.place(l, *old)
++            if not best:
++                break
++            gain, l, old, new = best
++            s.unplace(l)
++            s.place(l, *new)
++            applied.append((gain, l, old, new))
++        if not applied:
++            self.stdout.write('✅ Jadval lokal optimal - yaxshilash topilmadi')
++        for i, (gain, l, old, new) in enumerate(applied[:o['top']], 1):
++            self.stdout.write(f'{i}. {l.group} ({l.kind}): {DAY_NAMES[old[0]]} {old[1]}-para → '
++                              f'{DAY_NAMES[new[0]]} {new[1]}-para   (+{gain:.1f} ball)')
++
++        after_total = s.total_cost()
++        score = max(0, 100 - after_total / max(1, len(slots)) * 4)
++        self.stdout.write(self.style.MIGRATE_HEADING('\n=== XULOSA ==='))
++        self.stdout.write(f'Jarima: {before_total:.1f} → {after_total:.1f} (takliflardan keyin)')
++        self.stdout.write(f'Sifat bahosi: {score:.0f}/100')
++
++        if applied and o['apply']:
++            with transaction.atomic():
++                # unique constraint'lar sababli avval band slotlarni vaqtincha bo'shatamiz
++                ids = {db_id[i]: s.assign[i] for i in s.assign if i in db_id}
++                objs = {x.pk: x for x in TimetableSlot.objects.filter(pk__in=ids)}
++                TimetableSlot.objects.filter(pk__in=ids).delete()
++                TimetableSlot.objects.bulk_create([
++                    TimetableSlot(group_name=objs[pk].group_name, subject_id=objs[pk].subject_id,
++                                  teacher_id=objs[pk].teacher_id, room_id=r, lesson_type=objs[pk].lesson_type,
++                                  day_of_week=d, pair_number=p)
++                    for pk, (d, p, r) in ids.items()])
++            self.stdout.write(self.style.SUCCESS('✅ Yaxshilanishlar qo\'llandi'))
++        elif applied:
++            self.stdout.write("💡 Qo'llash uchun: python manage.py analyze_schedule --apply")
++
+ 
+-    def handle(self, *args, **options):
+-        self.stdout.write('📊 Jadval tahlili va optimizatsiya maslahatlari...\n')
+-        
+-        # 1. O'qituvchilarning kunlik darslarini tahlil qilish
+-        self.stdout.write('=== 1. O\'QITUVCHILARNING KUNLIK DARSLARI ===')
+-        teacher_daily_stats = defaultdict(lambda: defaultdict(int))
+-        
+-        for slot in TimetableSlot.objects.select_related('teacher'):
+-            teacher_daily_stats[slot.teacher][slot.day_of_week] += 1
+-        
+-        for teacher, days in teacher_daily_stats.items():
+-            for day, count in days.items():
+-                day_names = {1: 'Dushanba', 2: 'Seshanba', 3: 'Chorshanba', 4: 'Payshanba', 5: 'Juma', 6: 'Shanba'}
+-                if count > 3:
+-                    self.stdout.write(
+-                        self.style.WARNING(
+-                            f"⚠️ {teacher.full_name}: {day_names[day]} - {count} para (maksimal 3 tavsiya etiladi)"
+-                        )
+-                    )
+-                elif count < 2 and count > 0:
+-                    self.stdout.write(
+-                        f"✅ {teacher.full_name}: {day_names[day]} - {count} para (yaxshi)"
+-                    )
+-        
+-        # 2. Xonalarning bandlik darajasini tahlil qilish
+-        self.stdout.write('\n=== 2. XONALARNING BANDLIGI ===')
+-        room_usage = defaultdict(lambda: defaultdict(int))
+-        
+-        for slot in TimetableSlot.objects.select_related('room'):
+-            room_usage[slot.room][slot.day_of_week] += 1
+-        
+-        for room, days in room_usage.items():
+-            total_usage = sum(days.values())
+-            capacity = room.capacity
+-            usage_percent = (total_usage / (capacity * 5)) * 100  # 5 para per day, 6 days
+-            
+-            if usage_percent > 80:
+-                self.stdout.write(
+-                    self.style.WARNING(
+-                        f"⚠️ {room.name}: {total_usage}/{capacity*5} ({usage_percent:.1f}% band) - ko'p ishlatilmoqda"
+-                    )
+-                )
+-            elif usage_percent < 30:
+-                self.stdout.write(
+-                    f"✅ {room.name}: {total_usage}/{capacity*5} ({usage_percent:.1f}% band) - bo'sh ko'p"
+-                )
+-        
+-        # 3. Guruhlarning darslarini tahlil qilish
+-        self.stdout.write('\n=== 3. GURUHLARNING DARLARI ===')
+-        group_stats = defaultdict(lambda: defaultdict(int))
+-        
+-        for slot in TimetableSlot.objects.all():
+-            group_stats[slot.group_name][slot.day_of_week] += 1
+-        
+-        for group, days in group_stats.items():
+-            for day, count in days.items():
+-                day_names = {1: 'Dushanba', 2: 'Seshanba', 3: 'Chorshanba', 4: 'Payshanba', 5: 'Juma', 6: 'Shanba'}
+-                if count > 4:
+-                    self.stdout.write(
+-                        self.style.WARNING(
+-                            f"⚠️ {group}: {day_names[day]} - {count} para (juda ko'p)"
+-                        )
+-                    )
+-                elif count == 0:
+-                    self.stdout.write(
+-                        f"ℹ️ {group}: {day_names[day]} - {count} para (dars yo'q)"
+-                    )
+-        
+-        # 4. Optimizatsiya maslahatlari
+-        self.stdout.write('\n=== 4. OPTIMIZATSIYA MASLAHATLARI ===')
+-        
+-        # 4.1 O'qituvchilarni boshqa kunga ko'chirish maslahati
+-        suggestions = []
+-        
+-        for teacher, days in teacher_daily_stats.items():
+-            overloaded_days = [day for day, count in days.items() if count > 3]
+-            underloaded_days = [day for day, count in days.items() if count < 2 and count > 0]
+-            
+-            if overloaded_days and underloaded_days:
+-                day_names = {1: 'Dushanba', 2: 'Seshanba', 3: 'Chorshanba', 4: 'Payshanba', 5: 'Juma', 6: 'Shanba'}
+-                for over_day in overloaded_days:
+-                    for under_day in underloaded_days:
+-                        benefit = (days[over_day] - 3) * 10  # Har bir ortiqcha para uchun 10 ball
+-                        suggestions.append({
+-                            'type': 'teacher_move',
+-                            'teacher': teacher.full_name,
+-                            'from_day': day_names[over_day],
+-                            'to_day': day_names[under_day],
+-                            'benefit': benefit,
+-                            'description': f"{teacher.full_name}ni {day_names[over_day]}dan {day_names[under_day]}ga ko'chirish ({days[over_day]} → {days[under_day] + 1})"
+-                        })
+-        
+-        # 4.2 Guruhlarni boshqa kunga ko'chirish maslahati
+-        for group, days in group_stats.items():
+-            overloaded_days = [day for day, count in days.items() if count > 4]
+-            underloaded_days = [day for day, count in days.items() if count < 2 and count > 0]
+-            
+-            if overloaded_days and underloaded_days:
+-                day_names = {1: 'Dushanba', 2: 'Seshanba', 3: 'Chorshanba', 4: 'Payshanba', 5: 'Juma', 6: 'Shanba'}
+-                for over_day in overloaded_days:
+-                    for under_day in underloaded_days:
+-                        benefit = (days[over_day] - 4) * 15  # Har bir ortiqcha para uchun 15 ball
+-                        suggestions.append({
+-                            'type': 'group_move',
+-                            'group': group,
+-                            'from_day': day_names[over_day],
+-                            'to_day': day_names[under_day],
+-                            'benefit': benefit,
+-                            'description': f"{group} guruhini {day_names[over_day]}dan {day_names[under_day]}ga ko'chirish ({days[over_day]} → {days[under_day] + 1})"
+-                        })
+-        
+-        # Maslahatlarni foyda bo'yicha tartiblash
+-        suggestions.sort(key=lambda x: x['benefit'], reverse=True)
+-        
+-        if suggestions:
+-            self.stdout.write('\n🎯 TOP 10 MASLAHATLAR (foyda bo\'yicha):')
+-            for i, suggestion in enumerate(suggestions[:10], 1):
+-                self.stdout.write(
+-                    f"{i}. {suggestion['description']} (Foyda: {suggestion['benefit']} ball)"
+-                )
+-        else:
+-            self.stdout.write('✅ Jadval optimal holatda!')
+-        
+-        # 5. Xulosa
+-        self.stdout.write('\n=== 5. XULOSA ===')
+-        self.stdout.write('📋 Umumiy tavsiyalar:')
+-        self.stdout.write('1. O\'qituvchilar kuniga maksimal 3 para dars bo\'lishi kerak')
+-        self.stdout.write('2. Guruhlar kuniga maksimal 4-5 para dars bo\'lishi kerak')
+-        self.stdout.write('3. Juma tushdan keyin dars qo\'yish tavsiya etiladi')
+-        self.stdout.write('4. Ma\'ruzalarni ertalab (1-3 para), seminarlarni tushdan keyin (4-5 para)')
+-        self.stdout.write('5. Xonalar sig\'imidan to\'li foydalanish kerak')
+-        
+-        self.stdout.write(self.style.SUCCESS('\n✅ Tahlil tugadi!'))
++def teachers_name(slots, tid):
++    for sl in slots:
++        if sl.teacher_id == tid:
++            return sl.teacher.full_name
++    return str(tid)
+diff --git a/timetable/management/commands/generate_schedule.py b/timetable/management/commands/generate_schedule.py
+index edb7f4e..ad4da1d 100644
+--- a/timetable/management/commands/generate_schedule.py
++++ b/timetable/management/commands/generate_schedule.py
+@@ -1,241 +1,69 @@
+ from django.core.management.base import BaseCommand
+ from django.db import transaction
+-from timetable.models import CoursePlan, TimetableSlot, Room, SystemSettings
+-import random
++
++from timetable.models import CoursePlan, Room, SystemSettings, TimetableSlot, Teacher
++from timetable.scheduler import Lesson, TeacherInfo, diagnose, solve, DAYS
++
++DAY_NAMES = {1: 'Dushanba', 2: 'Seshanba', 3: 'Chorshanba', 4: 'Payshanba', 5: 'Juma', 6: 'Shanba'}
++
++
++def build_problem():
++    """DB dan solver uchun ma'lumotlarni tayyorlaydi."""
++    ss = SystemSettings.objects.first()
++    hps = ss.hours_per_stavka if ss else 20
++    teachers = {
++        t.id: TeacherInfo(cap=int(t.stavka * hps), daily_max=max(1, t.max_daily_hours),
++                          rest=max(1, t.rest_hours_required))
++        for t in Teacher.objects.all()
++    }
++    lessons, n = [], 0
++    for cp in CoursePlan.objects.select_related('subject', 'teacher'):
++        for kind, hours in (('lecture', cp.lecture_hours_per_week), ('seminar', cp.seminar_hours_per_week)):
++            for _ in range(hours):
++                lessons.append(Lesson(n, cp.id, cp.subject_id, cp.teacher_id, cp.group_name, kind))
++                n += 1
++    rooms = [(r.id, r.capacity) for r in Room.objects.all()]
++    return lessons, teachers, rooms
+ 
+ 
+ class Command(BaseCommand):
+-    help = 'Generate timetable schedule automatically'
++    help = "Jadvalni avtomatik generatsiya qilish (constraint solver + local search)"
+ 
+-    def handle(self, *args, **options):
+-        self.stdout.write('Jadval generatsiyasi boshlanmoqda...')
+-        
+-        # Tizim sozlamalarini olish
+-        system_settings = SystemSettings.objects.first()
+-        if system_settings:
+-            hours_per_stavka = system_settings.hours_per_stavka
+-            self.stdout.write(f'1 stavka = {hours_per_stavka} soat/hafta')
+-        else:
+-            hours_per_stavka = 20  # Default qiymat
+-            self.stdout.write('Tizim sozlamalari topilmadi. Default: 1 stavka = 20 soat/hafta')
+-        
+-        # Eski jadvalni tozalash
+-        TimetableSlot.objects.all().delete()
+-        self.stdout.write('Eski jadval ma\'lumotlari tozalandi.')
+-        
+-        # Barcha o\'quv rejalarni olish
+-        course_plans = CoursePlan.objects.select_related('subject', 'teacher').all()
+-        
+-        if not course_plans.exists():
+-            self.stdout.write(self.style.WARNING('O\'quv rejasi topilmadi. Avval CoursePlan qo\'shing.'))
+-            return
+-        
+-        # Barcha xonalarni olish
+-        rooms = list(Room.objects.all())
++    def add_arguments(self, parser):
++        parser.add_argument('--seed', type=int, default=1)
++        parser.add_argument('--restarts', type=int, default=5)
++        parser.add_argument('--iterations', type=int, default=20000)
++        parser.add_argument('--dry-run', action='store_true', help="Bazaga yozmasdan natijani ko'rsatish")
++
++    def handle(self, *args, **o):
++        lessons, teachers, rooms = build_problem()
++        if not lessons:
++            return self.stdout.write(self.style.WARNING("O'quv rejasi topilmadi. Avval CoursePlan qo'shing."))
+         if not rooms:
+-            self.stdout.write(self.style.ERROR('Auditoriya topilmadi. Avval Room qo\'shing.'))
+-            return
+-        
+-        # Har bir o\'quv rejasi uchun jadval yaratish
+-        with transaction.atomic():
+-            for course_plan in course_plans:
+-                self.stdout.write(f'{course_plan} uchun jadval yaratilmoqda...')
+-                
+-                # Ma'ruzalarni avval joylashtirish
+-                self._generate_lessons(
+-                    course_plan, 
+-                    rooms, 
+-                    lesson_type='lecture',
+-                    hours=course_plan.lecture_hours_per_week,
+-                    hours_per_stavka=hours_per_stavka
+-                )
+-                
+-                # Seminarlarni keyin joylashtirish (ma'ruzadan keyin)
+-                self._generate_lessons(
+-                    course_plan,
+-                    rooms,
+-                    lesson_type='seminar',
+-                    hours=course_plan.seminar_hours_per_week,
+-                    after_lecture=True,
+-                    hours_per_stavka=hours_per_stavka
+-                )
+-        
+-        self.stdout.write(self.style.SUCCESS('Jadval muvaffaqiyatli generatsiya qilindi!'))
+-    
+-    def _generate_lessons(self, course_plan, rooms, lesson_type, hours, after_lecture=False, hours_per_stavka=20):
+-        """Berilgan dars turi uchun jadval slotlarini generatsiya qilish"""
+-        teacher = course_plan.teacher
+-        group_name = course_plan.group_name
+-        subject = course_plan.subject
+-        
+-        # O'qituvchining allaqachon band bo'lgan vaqtlarini olish
+-        teacher_slots = TimetableSlot.objects.filter(teacher=teacher).values_list(
+-            'day_of_week', 'pair_number'
+-        )
+-        teacher_busy_slots = set(teacher_slots)
+-        
+-        # O'qituvchining joriy haftalik soatlarini hisoblash
+-        current_weekly_hours = TimetableSlot.objects.filter(teacher=teacher).count()
+-        max_weekly_hours = int(teacher.stavka * hours_per_stavka)  # Tizim sozlamalaridan olinadi
+-        
+-        # Guruhning allaqachon band bo'lgan vaqtlarini olish
+-        group_slots = TimetableSlot.objects.filter(group_name=group_name).values_list(
+-            'day_of_week', 'pair_number'
+-        )
+-        group_busy_slots = set(group_slots)
+-        
+-        # O'qituvchining har kundagi darslar sonini hisoblash
+-        teacher_daily_lessons = {}
+-        for day, pair in teacher_busy_slots:
+-            teacher_daily_lessons[day] = teacher_daily_lessons.get(day, 0) + 1
+-        
+-        # Barcha mumkin bo'lgan slotlarni yaratish (kun va para kombinatsiyalari)
+-        all_slots = []
+-        for day in range(1, 7):  # 1-6 kun
+-            for pair in range(1, 6):  # 1-5 para
+-                all_slots.append((day, pair))
+-        
+-        # Slotlarni aralashtirish (tasodifiy tartib)
+-        random.shuffle(all_slots)
+-        
+-        # Har bir soat uchun slot topish
+-        lessons_created = 0
+-        
+-        for day, pair in all_slots:
+-            if lessons_created >= hours:
+-                break
+-            
+-            # Stavka cheklovi
+-            if current_weekly_hours + lessons_created >= max_weekly_hours:
+-                break
+-            
+-            slot_key = (day, pair)
+-            
+-            # Tekshirishlar:
+-            # 1. O'qituvchi band emasligi
+-            if slot_key in teacher_busy_slots:
+-                continue
+-            
+-            # 2. Guruh band emasligi
+-            if slot_key in group_busy_slots:
+-                continue
+-            
+-            # 3. Kunlik darslar soni cheklovi (maksimal 3 para)
+-            daily_lessons = teacher_daily_lessons.get(day, 0)
+-            if daily_lessons >= 3:
+-                continue
+-            
+-            # 4. O'qituvchining tanaffus qoidasiga rioya qilish
+-            if not self._check_rest_hours(teacher, day, pair, lesson_type):
+-                continue
+-            
+-            # 5. Seminar bo'lsa, ma'ruzadan keyin bo'lishi kerak
+-            if after_lecture:
+-                if not self._check_seminar_after_lecture(teacher, subject, group_name, day, pair):
+-                    continue
+-            
+-            # Mos xona topish
+-            room = self._find_available_room(rooms, day, pair)
+-            if not room:
+-                continue
+-            
+-            # Slot yaratish
+-            TimetableSlot.objects.create(
+-                group_name=group_name,
+-                subject=subject,
+-                teacher=teacher,
+-                room=room,
+-                lesson_type=lesson_type,
+-                day_of_week=day,
+-                pair_number=pair
+-            )
+-            
+-            # Band slotlarni yangilash
+-            teacher_busy_slots.add(slot_key)
+-            group_busy_slots.add(slot_key)
+-            teacher_daily_lessons[day] = daily_lessons + 1
+-            
+-            lessons_created += 1
+-            self.stdout.write(f'  {lesson_type}: {self._get_day_name(day)} - {pair}-para')
+-        
+-        if lessons_created < hours:
+-            self.stdout.write(
+-                self.style.WARNING(
+-                    f'{course_plan.subject.name} ({lesson_type}) uchun faqat {lessons_created}/{hours} soat joylashtirildi. '
+-                    f'O\'qituvchi stavkasi: {teacher.stavka} (maksimal {max_weekly_hours} soat/hafta)'
+-                )
+-            )
+-    
+-    def _check_rest_hours(self, teacher, day, pair, lesson_type):
+-        """O'qituvchining tanaffus qoidasini tekshirish"""
+-        rest_required = teacher.rest_hours_required
+-        
+-        # O'qituvchining shu kundagi barcha slotlarini olish
+-        teacher_slots = TimetableSlot.objects.filter(
+-            teacher=teacher,
+-            day_of_week=day
+-        ).order_by('pair_number')
+-        
+-        if not teacher_slots.exists():
+-            return True
+-        
+-        # Agar rest_required = 1 bo'lsa, har 3 paradan keyin 1 para tanaffus
+-        # Ya'ni ketma-ket 3 para dars bo'lishi mumkin, 4-chi para bo'sh bo'lishi kerak
+-        
+-        # Shu kundagi barcha band paralarni olish
+-        busy_pairs = [slot.pair_number for slot in teacher_slots]
+-        
+-        # Hozirgi paradan oldingi ketma-ket darslarni sanash
+-        consecutive_before = 0
+-        for p in range(pair - 1, 0, -1):
+-            if p in busy_pairs:
+-                consecutive_before += 1
+-            else:
+-                break
+-        
+-        # Agar ketma-ket darslar 3 ta bo'lsa, hozirgi para bo'sh bo'lishi kerak (tanaffus)
+-        if consecutive_before >= 3:
+-            return False
+-        
+-        return True
+-    
+-    def _check_seminar_after_lecture(self, teacher, subject, group_name, day, pair):
+-        """Seminar ma'ruzadan keyin bo'lishini tekshirish"""
+-        # Shu fan va guruh uchun ma'ruzalarni olish
+-        lectures = TimetableSlot.objects.filter(
+-            subject=subject,
+-            group_name=group_name,
+-            lesson_type='lecture'
+-        ).order_by('day_of_week', 'pair_number')
+-        
+-        if not lectures.exists():
+-            # Ma'ruza hali joylashtirilmagan, seminar ham joylashtirilmaydi
+-            return False
+-        
+-        # Seminar ma'ruzadan keyin bo'lishi kerak
+-        # Ya'ni kamida bitta ma'ruza seminardan oldin bo'lishi shart
+-        for lecture in lectures:
+-            # Agar ma'ruza seminardan oldin bo'lsa (oldingi kun yoki o'sha kuni erta) - OK
+-            if lecture.day_of_week < day or (lecture.day_of_week == day and lecture.pair_number < pair):
+-                return True
+-        
+-        # Hech qanday ma'ruza seminardan oldin emas
+-        return False
+-    
+-    def _find_available_room(self, rooms, day, pair):
+-        """Berilgan vaqt uchun bo'sh xona topish"""
+-        for room in rooms:
+-            if not TimetableSlot.objects.filter(room=room, day_of_week=day, pair_number=pair).exists():
+-                return room
+-        return None
+-    
+-    def _get_day_name(self, day):
+-        days = {
+-            1: 'Dushanba',
+-            2: 'Seshanba',
+-            3: 'Chorshanba',
+-            4: 'Payshanba',
+-            5: 'Juma',
+-            6: 'Shanba',
+-        }
+-        return days.get(day, str(day))
++            return self.stdout.write(self.style.ERROR("Auditoriya topilmadi. Avval Room qo'shing."))
++
++        names = {t.id: t.full_name for t in Teacher.objects.all()}
++        for kind, who, need, limit in diagnose(lessons, teachers, len(rooms)):
++            label = names.get(who, who) or 'xonalar'
++            self.stdout.write(self.style.WARNING(
++                f"⚠️  Sig'im yetarli emas [{kind}] {label}: {need} soat kerak, mumkin: {limit}"))
++
++        self.stdout.write(f"🧮 {len(lessons)} ta dars joylashtirilmoqda...")
++        s = solve(lessons, teachers, rooms, seed=o['seed'], restarts=o['restarts'], iterations=o['iterations'])
++        missing = s.unplaced()
++
++        if not o['dry_run']:
++            with transaction.atomic():
++                TimetableSlot.objects.all().delete()
++                TimetableSlot.objects.bulk_create([
++                    TimetableSlot(group_name=s.lessons[i].group, subject_id=s.lessons[i].subject,
++                                  teacher_id=s.lessons[i].teacher, room_id=room,
++                                  lesson_type=s.lessons[i].kind, day_of_week=d, pair_number=p)
++                    for i, (d, p, room) in s.assign.items()
++                ])
++        self.stdout.write(f"✅ Joylashtirildi: {len(s.assign)}/{len(lessons)}   Jarima balli: {s.total_cost():.1f}")
++        for l in missing:
++            self.stdout.write(self.style.WARNING(
++                f"   ❌ joylashmadi: {l.group} / fan#{l.subject} ({l.kind}) - {names.get(l.teacher)}"))
++        if not missing:
++            self.stdout.write(self.style.SUCCESS("Jadval muvaffaqiyatli generatsiya qilindi!"))
+diff --git a/timetable/scheduler.py b/timetable/scheduler.py
+new file mode 100644
+index 0000000..7a2bbaf
+--- /dev/null
++++ b/timetable/scheduler.py
+@@ -0,0 +1,319 @@
++"""
++Jadval solveri (DB'dan mustaqil, test qilish oson).
++
++HARD (majburiy) cheklovlar:
++  1. O'qituvchi / guruh / xona bir vaqtda faqat bitta darsda
++  2. O'qituvchining haftalik soati <= stavka * hours_per_stavka
++  3. O'qituvchining kunlik soati <= max_daily_hours
++  4. Ketma-ket 3 paradan ortiq dars yo'q; 3 para ketma-ket bo'lsa keyin
++     kamida rest_hours_required para tanaffus
++  5. Har bir fan+guruh uchun birinchi seminar birinchi ma'ruzadan KEYIN
++
++SOFT (sifat) cheklovlari - jarima ballari bilan minimallashtiriladi:
++  guruh va o'qituvchi "oynalari", kunlik yuklanish balansi, bir kunda bitta
++  turdagi darsning takrorlanishi, shanba / 5-para, ma'ruza ertalab, ...
++"""
++import random
++from collections import defaultdict
++from dataclasses import dataclass
++
++DAYS = range(1, 7)
++PAIRS = range(1, 6)
++MAX_RUN = 3
++
++
++@dataclass(frozen=True)
++class Lesson:
++    id: int
++    plan: int
++    subject: int
++    teacher: int
++    group: str
++    kind: str  # 'lecture' | 'seminar'
++
++
++@dataclass(frozen=True)
++class TeacherInfo:
++    cap: int          # haftalik maksimal soat
++    daily_max: int
++    rest: int = 1
++
++
++class Solver:
++    def __init__(self, lessons, teachers, rooms, seed=0):
++        self.lessons = {l.id: l for l in lessons}
++        self.teachers = teachers          # {teacher_id: TeacherInfo}
++        self.rooms = sorted(rooms, key=lambda r: r[1])  # [(room_id, capacity)]
++        self.rng = random.Random(seed)
++        self.assign = {}                  # lesson_id -> (day, pair, room)
++        self.tb = defaultdict(lambda: defaultdict(set))   # teacher -> day -> pairs
++        self.gb = defaultdict(lambda: defaultdict(set))   # group -> day -> pairs
++        self.rb = defaultdict(set)                         # (day, pair) -> rooms
++        self.tcount = defaultdict(int)
++        self.by_plan = defaultdict(list)
++        self.by_group = defaultdict(list)
++        for l in lessons:
++            self.by_plan[l.plan].append(l)
++            self.by_group[l.group].append(l)
++
++    # ---------------- state primitives ----------------
++    def place(self, l, d, p, room):
++        self.assign[l.id] = (d, p, room)
++        self.tb[l.teacher][d].add(p)
++        self.gb[l.group][d].add(p)
++        self.rb[(d, p)].add(room)
++        self.tcount[l.teacher] += 1
++
++    def unplace(self, l):
++        d, p, room = self.assign.pop(l.id)
++        self.tb[l.teacher][d].discard(p)
++        self.gb[l.group][d].discard(p)
++        self.rb[(d, p)].discard(room)
++        self.tcount[l.teacher] -= 1
++
++    def free_room(self, l, d, p):
++        used = self.rb[(d, p)]
++        free = [r for r in self.rooms if r[0] not in used]
++        if not free:
++            return None
++        return (free[-1] if l.kind == 'lecture' else free[0])[0]
++
++    # ---------------- hard constraints ----------------
++    def _runs_ok(self, teacher, pairs):
++        info = self.teachers[teacher]
++        ps = sorted(pairs)
++        runs, start = [], ps[0]
++        for a, b in zip(ps, ps[1:] + [None]):
++            if b is None or b != a + 1:
++                runs.append((start, a))
++                start = b
++        for i, (s, e) in enumerate(runs):
++            n = e - s + 1
++            if n > MAX_RUN:
++                return False
++            if n == MAX_RUN and i + 1 < len(runs) and runs[i + 1][0] - e - 1 < info.rest:
++                return False
++            if i and runs[i - 1][1] - runs[i - 1][0] + 1 == MAX_RUN and s - runs[i - 1][1] - 1 < info.rest:
++                return False
++        return True
++
++    def _order_ok(self, l, d, p):
++        """Birinchi ma'ruza < birinchi seminar (l joriy holatda joylashtirilmagan)."""
++        pos = (d, p)
++        others = [self.assign[x.id][:2] for x in self.by_plan[l.plan]
++                  if x.id != l.id and x.id in self.assign]
++        lec = [self.assign[x.id][:2] for x in self.by_plan[l.plan]
++               if x.id != l.id and x.kind == 'lecture' and x.id in self.assign]
++        sem = [self.assign[x.id][:2] for x in self.by_plan[l.plan]
++               if x.id != l.id and x.kind == 'seminar' and x.id in self.assign]
++        if l.kind == 'seminar':
++            return bool(lec) and min(lec) < pos
++        # ma'ruza: barcha seminarlardan oldin kamida bitta ma'ruza qolishi kerak
++        first = min(lec + [pos])
++        return not sem or first < min(sem)
++
++    def hard_ok(self, l, d, p):
++        t, g = l.teacher, l.group
++        info = self.teachers[t]
++        if p in self.tb[t][d] or p in self.gb[g][d]:
++            return False
++        if self.tcount[t] >= info.cap or len(self.tb[t][d]) >= info.daily_max:
++            return False
++        if not self._runs_ok(t, self.tb[t][d] | {p}):
++            return False
++        return self._order_ok(l, d, p)
++
++    def candidates(self, l):
++        out = []
++        for d in DAYS:
++            for p in PAIRS:
++                if self.hard_ok(l, d, p):
++                    room = self.free_room(l, d, p)
++                    if room is not None:
++                        out.append((d, p, room))
++        return out
++
++    # ---------------- soft cost ----------------
++    def cost_group(self, g):
++        c, counts = 0.0, []
++        kinds = defaultdict(int)
++        for d, ps in self.gb[g].items():
++            n = len(ps)
++            if not n:
++                continue
++            counts.append(n)
++            c += 8 * ((max(ps) - min(ps) + 1) - n)      # oyna
++            c += 20 * max(0, n - 4)                       # kuniga >4 para
++            c += 3 if n == 1 else 0                       # yolg'iz para
++            c += 2 if d == 6 else 0
++            c += 1.5 * (5 in ps)
++            c += 0.6 * n * n                              # balans
++        for l in self.by_group[g]:
++            if l.id in self.assign:
++                d, p, _ = self.assign[l.id]
++                if l.kind == 'lecture':
++                    c += 0.5 * (p - 1)
++                    kinds[(l.subject, d)] += 1
++        c += 6 * sum(v - 1 for v in kinds.values() if v > 1)   # bir kunda 2 ma'ruza
++        return c
++
++    def cost_teacher(self, t):
++        c = 0.0
++        for d, ps in self.tb[t].items():
++            n = len(ps)
++            if not n:
++                continue
++            c += 4 * ((max(ps) - min(ps) + 1) - n)
++            c += 10 * max(0, n - 3)
++            c += 1.5                                      # ish kuni
++            c += 2 if d == 6 else 0
++        return c
++
++    def total_cost(self):
++        gs = {l.group for l in self.lessons.values()}
++        return sum(self.cost_group(g) for g in gs) + sum(self.cost_teacher(t) for t in self.teachers)
++
++    def _local(self, l):
++        return self.cost_group(l.group) + self.cost_teacher(l.teacher)
++
++    # ---------------- construction ----------------
++    def _difficulty(self):
++        demand = defaultdict(int)
++        for l in self.lessons.values():
++            demand[l.teacher] += 1
++        def key(l):
++            info = self.teachers[l.teacher]
++            return (l.kind != 'lecture', -demand[l.teacher] / max(1, info.cap), self.rng.random())
++        return sorted(self.lessons.values(), key=key)
++
++    def _best_slot(self, l):
++        best, best_c = None, None
++        base = self._local(l)
++        for d, p, room in self.candidates(l):
++            self.place(l, d, p, room)
++            delta = self._local(l) - base
++            self.unplace(l)
++            delta += self.rng.random() * 0.01
++            if best_c is None or delta < best_c:
++                best, best_c = (d, p, room), delta
++        return best
++
++    def construct(self):
++        # ma'ruzalar avval, keyin seminarlar (tartib _difficulty ichida)
++        pending = []
++        for l in self._difficulty():
++            slot = self._best_slot(l)
++            if slot:
++                self.place(l, *slot)
++            else:
++                pending.append(l)
++        return pending
++
++    def repair(self, pending, rounds=6):
++        """Ejection chain: 1 ta bloklovchi darsni boshqa joyga ko'chirib joy ochish."""
++        for _ in range(rounds):
++            if not pending:
++                break
++            progress = False
++            for l in list(pending):
++                if self._eject_and_place(l):
++                    pending.remove(l)
++                    progress = True
++            if not progress:
++                break
++        return pending
++
++    def _eject_and_place(self, l):
++        slots = [(d, p) for d in DAYS for p in PAIRS]
++        self.rng.shuffle(slots)
++        for d, p in slots:
++            blockers = {x.id: x for x in self.lessons.values() if x.id in self.assign
++                        and self.assign[x.id][:2] == (d, p)
++                        and (x.teacher == l.teacher or x.group == l.group)}
++            if len(blockers) > 2:
++                continue
++            saved = {b.id: self.assign[b.id] for b in blockers.values()}
++            for b in blockers.values():
++                self.unplace(b)
++            if self.hard_ok(l, d, p) and (room := self.free_room(l, d, p)) is not None:
++                self.place(l, d, p, room)
++                moved, ok = [], True
++                for b in blockers.values():
++                    cands = [c for c in self.candidates(b) if (c[0], c[1]) != (d, p)]
++                    if not cands:
++                        ok = False
++                        break
++                    self.place(b, *self.rng.choice(cands))
++                    moved.append(b)
++                if ok:
++                    return True
++                for b in moved:
++                    self.unplace(b)
++                self.unplace(l)
++            for bid, s in saved.items():
++                self.place(self.lessons[bid], *s)
++        return False
++
++    # ---------------- improvement ----------------
++    def improve(self, iterations=20000):
++        ids = [i for i in self.assign]
++        if not ids:
++            return
++        temp = 2.0
++        for it in range(iterations):
++            l = self.lessons[self.rng.choice(ids)]
++            old = self.assign[l.id]
++            before = self._local(l)
++            self.unplace(l)
++            d, p = self.rng.choice(list(DAYS)), self.rng.choice(list(PAIRS))
++            room = self.free_room(l, d, p)
++            if room is None or (d, p) == old[:2] or not self.hard_ok(l, d, p):
++                self.place(l, *old)
++                continue
++            self.place(l, d, p, room)
++            delta = self._local(l) - before
++            t = temp * (1 - it / iterations) + 1e-6
++            if delta > 0 and self.rng.random() >= pow(2.718281828, -delta / t):
++                self.unplace(l)
++                self.place(l, *old)
++
++    def unplaced(self):
++        return [l for l in self.lessons.values() if l.id not in self.assign]
++
++
++def solve(lessons, teachers, rooms, seed=0, restarts=5, iterations=20000):
++    """Bir nechta restartdan eng yaxshisini qaytaradi (kam joylashtirilmagan, kam jarima)."""
++    best = None
++    for r in range(restarts):
++        s = Solver(lessons, teachers, rooms, seed=seed * 1000 + r)
++        pending = s.repair(s.construct())
++        s.improve(iterations)
++        # improve qilingandan keyin qolgan darslarni yana urinib ko'ramiz
++        pending = s.repair([l for l in s.unplaced()])
++        score = (len(pending), s.total_cost())
++        if best is None or score < best[0]:
++            best = (score, s)
++        if score[0] == 0 and score[1] < 1:
++            break
++    return best[1]
++
++
++def diagnose(lessons, teachers, n_rooms):
++    """Joylashtirish mumkin emasligining oldindan sabablari."""
++    issues = []
++    t_demand, g_demand = defaultdict(int), defaultdict(int)
++    for l in lessons:
++        t_demand[l.teacher] += 1
++        g_demand[l.group] += 1
++    for t, n in t_demand.items():
++        info = teachers[t]
++        limit = min(info.cap, info.daily_max * len(DAYS))
++        if n > limit:
++            issues.append(('teacher', t, n, limit))
++    slots = len(DAYS) * len(PAIRS)
++    for g, n in g_demand.items():
++        if n > slots:
++            issues.append(('group', g, n, slots))
++    if len(lessons) > n_rooms * slots:
++        issues.append(('rooms', None, len(lessons), n_rooms * slots))
++    return issues
+diff --git a/timetable/templates/base.html b/timetable/templates/base.html
+index 5547825..5a6de4d 100644
+--- a/timetable/templates/base.html
++++ b/timetable/templates/base.html
+@@ -1,159 +1,77 @@
+-<!DOCTYPE html>
++{% load static %}<!DOCTYPE html>
+ <html lang="uz">
+ <head>
+-    <meta charset="UTF-8">
+-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+-    <title>Smart Timetable - Dars Jadvali</title>
+-    <script src="https://cdn.tailwindcss.com"></script>
+-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+-    <style>
+-        body {
+-            font-family: 'Inter', sans-serif;
+-        }
+-        .glass-effect {
+-            background: rgba(255, 255, 255, 0.95);
+-            backdrop-filter: blur(20px);
+-            border: 1px solid rgba(255, 255, 255, 0.3);
+-            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+-        }
+-        .gradient-text {
+-            background: linear-gradient(135deg, #1e40af 0%, #7c3aed 50%, #581c87 100%);
+-            -webkit-background-clip: text;
+-            -webkit-text-fill-color: transparent;
+-            background-clip: text;
+-            background-size: 200% 200%;
+-            animation: gradient-shift 3s ease infinite;
+-        }
+-        @keyframes gradient-shift {
+-            0%, 100% { background-position: 0% 50%; }
+-            50% { background-position: 100% 50%; }
+-        }
+-        .card-hover {
+-            transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+-        }
+-        .card-hover:hover {
+-            transform: translateY(-8px) scale(1.02);
+-            box-shadow: 0 25px 50px rgba(0, 0, 0, 0.15);
+-        }
+-        .animate-float {
+-            animation: float 4s ease-in-out infinite;
+-        }
+-        .animate-float-delayed {
+-            animation: float 4s ease-in-out infinite;
+-            animation-delay: 1s;
+-        }
+-        .animate-float-delayed-2 {
+-            animation: float 4s ease-in-out infinite;
+-            animation-delay: 2s;
+-        }
+-        .animate-spin-slow {
+-            animation: spin 10s linear infinite;
+-        }
+-        .animate-spin-reverse {
+-            animation: spin-reverse 10s linear infinite;
+-        }
+-        .animate-pulse-slow {
+-            animation: pulse 2s ease-in-out infinite;
+-        }
+-        .animate-bounce-slow {
+-            animation: bounce 2s ease-in-out infinite;
+-        }
+-        .animate-shake {
+-            animation: shake 0.5s ease-in-out infinite;
+-        }
+-        @keyframes float {
+-            0%, 100% { transform: translateY(0px) rotate(0deg); }
+-            50% { transform: translateY(-15px) rotate(5deg); }
+-        }
+-        @keyframes spin {
+-            from { transform: rotate(0deg); }
+-            to { transform: rotate(360deg); }
+-        }
+-        @keyframes spin-reverse {
+-            from { transform: rotate(360deg); }
+-            to { transform: rotate(0deg); }
+-        }
+-        @keyframes pulse {
+-            0%, 100% { transform: scale(1); opacity: 1; }
+-            50% { transform: scale(1.15); opacity: 0.8; }
+-        }
+-        @keyframes bounce {
+-            0%, 100% { transform: translateY(0); }
+-            50% { transform: translateY(-10px); }
+-        }
+-        @keyframes shake {
+-            0%, 100% { transform: translateX(0); }
+-            25% { transform: translateX(-5px); }
+-            75% { transform: translateX(5px); }
+-        }
+-        .university-bg {
+-            background: linear-gradient(135deg, #1e3a8a 0%, #3730a3 30%, #581c87 60%, #1e1b4b 100%);
+-            background-size: 400% 400%;
+-            animation: gradient-bg 15s ease infinite;
+-        }
+-        @keyframes gradient-bg {
+-            0%, 100% { background-position: 0% 50%; }
+-            50% { background-position: 100% 50%; }
+-        }
+-        .glow-effect {
+-            box-shadow: 0 0 20px rgba(59, 130, 246, 0.5);
+-            animation: glow 2s ease-in-out infinite;
+-        }
+-        @keyframes glow {
+-            0%, 100% { box-shadow: 0 0 20px rgba(59, 130, 246, 0.5); }
+-            50% { box-shadow: 0 0 40px rgba(59, 130, 246, 0.8); }
+-        }
+-        .shimmer {
+-            background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
+-            background-size: 200% 100%;
+-            animation: shimmer 2s infinite;
+-        }
+-        @keyframes shimmer {
+-            0% { background-position: -200% 0; }
+-            100% { background-position: 200% 0; }
+-        }
+-        .text-shadow {
+-            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
+-        }
+-        .neon-border {
+-            border: 2px solid rgba(59, 130, 246, 0.5);
+-            box-shadow: 0 0 10px rgba(59, 130, 246, 0.3), inset 0 0 10px rgba(59, 130, 246, 0.1);
+-        }
+-        .ripple {
+-            position: relative;
+-            overflow: hidden;
+-        }
+-        .ripple::after {
+-            content: '';
+-            position: absolute;
+-            top: 50%;
+-            left: 50%;
+-            width: 0;
+-            height: 0;
+-            background: rgba(255, 255, 255, 0.3);
+-            border-radius: 50%;
+-            transform: translate(-50%, -50%);
+-            animation: ripple 1s ease-out;
+-        }
+-        @keyframes ripple {
+-            to {
+-                width: 200%;
+-                height: 200%;
+-                opacity: 0;
+-            }
+-        }
+-    </style>
++<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
++<title>{% block title %}Smart Timetable{% endblock %}</title>
++<script src="https://cdn.tailwindcss.com"></script>
++<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
++<style>
++:root{--bg1:#0f172a;--bg2:#312e81;--card:rgba(255,255,255,.94)}
++body{font-family:Inter,system-ui,sans-serif;background:linear-gradient(135deg,var(--bg1),var(--bg2) 55%,#4c1d95);background-attachment:fixed;min-height:100vh}
++.glass{background:var(--card);backdrop-filter:blur(16px);border:1px solid rgba(255,255,255,.4);box-shadow:0 10px 40px rgba(0,0,0,.25)}
++.lift{transition:transform .25s,box-shadow .25s}.lift:hover{transform:translateY(-4px);box-shadow:0 18px 40px rgba(0,0,0,.28)}
++/* Harakatlanuvchi emojilar: kursor yaqinlashganda qochadi, ustiga borganda "pop" qiladi */
++.emo{display:inline-block;cursor:default;user-select:none;transition:transform .35s cubic-bezier(.2,1.6,.4,1);will-change:transform}
++.emo.idle{animation:bob 3.5s ease-in-out infinite}
++@keyframes bob{50%{transform:translateY(-6px) rotate(4deg)}}
++.emo.pop{animation:pop .5s}
++@keyframes pop{40%{transform:scale(1.6) rotate(-14deg)}100%{transform:scale(1)}}
++.now{animation:pulse 1.6s infinite}
++@keyframes pulse{0%{box-shadow:0 0 0 0 rgba(34,197,94,.6)}100%{box-shadow:0 0 0 14px rgba(34,197,94,0)}}
++.rise{animation:rise .5s both}@keyframes rise{from{opacity:0;transform:translateY(14px)}}
++@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
++</style>
+ </head>
+-<body class="university-bg min-h-screen">
+-    <!-- Animated Background -->
+-    <div class="fixed inset-0 overflow-hidden pointer-events-none">
+-        <div class="absolute -top-40 -right-40 w-80 h-80 bg-blue-500 rounded-full mix-blend-multiply filter blur-3xl opacity-20 animate-float"></div>
+-        <div class="absolute -bottom-40 -left-40 w-80 h-80 bg-purple-500 rounded-full mix-blend-multiply filter blur-3xl opacity-20 animate-float" style="animation-delay: 1s;"></div>
+-        <div class="absolute top-1/2 left-1/2 w-80 h-80 bg-indigo-500 rounded-full mix-blend-multiply filter blur-3xl opacity-20 animate-float" style="animation-delay: 2s;"></div>
+-    </div>
+-    
+-    <div class="relative container mx-auto px-4 py-8">
+-        {% block content %}{% endblock %}
+-    </div>
+-</body>
+-</html>
++<body class="text-slate-800">
++<div class="container mx-auto px-4 py-8 max-w-7xl">{% block content %}{% endblock %}
++<footer class="mt-12 text-center text-sm text-indigo-200">
++  <a href="https://t.me/darsmakerbot" target="_blank" class="hover:text-white"><span class="emo">🤖</span> Telegram bot</a>
++  <span class="mx-2">•</span><a href="/admin/" class="hover:text-white"><span class="emo">⚙️</span> Admin</a>
++  <p class="mt-2 opacity-70">© 2026 Smart Timetable</p>
++</footer></div>
++<script>
++(() => {
++  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
++  const emos = () => document.querySelectorAll('.emo');
++  const RADIUS = 110;
++  // 1) kursor emojiga yaqinlashsa - undan qochadi (mobil: barmoq bilan ham)
++  addEventListener('pointermove', e => {
++    if (reduce) return;
++    emos().forEach(el => {
++      const r = el.getBoundingClientRect(), cx = r.left + r.width / 2, cy = r.top + r.height / 2;
++      const dx = cx - e.clientX, dy = cy - e.clientY, dist = Math.hypot(dx, dy);
++      if (dist < RADIUS) {
++        const f = (1 - dist / RADIUS) * 34, k = f / (dist || 1);
++        el.classList.remove('idle');
++        el.style.transform = `translate(${dx * k}px,${dy * k}px) rotate(${dx * .3}deg) scale(1.15)`;
++      } else if (el.style.transform) { el.style.transform = ''; el.classList.add('idle'); }
++    });
++  }, {passive: true});
++  // 2) emojiga tegilganda - pop + kichik emojilar yomg'iri
++  const burst = (x, y, ch) => {
++    if (reduce) return;
++    for (let i = 0; i < 7; i++) {
++      const s = document.createElement('span');
++      s.textContent = ch; s.style.cssText = `position:fixed;left:${x}px;top:${y}px;pointer-events:none;font-size:${14 + Math.random() * 12}px;z-index:99`;
++      document.body.appendChild(s);
++      const a = Math.random() * Math.PI * 2, d = 40 + Math.random() * 60;
++      s.animate([{transform: 'translate(0,0) scale(1)', opacity: 1},
++                 {transform: `translate(${Math.cos(a) * d}px,${Math.sin(a) * d - 30}px) scale(.3) rotate(${Math.random() * 360}deg)`, opacity: 0}],
++                {duration: 800 + Math.random() * 400, easing: 'ease-out'}).onfinish = () => s.remove();
++    }
++  };
++  document.addEventListener('pointerover', e => {
++    const el = e.target.closest('.emo'); if (!el || el._t) return;
++    el.classList.add('pop'); burst(e.clientX, e.clientY, el.textContent.trim());
++    el._t = setTimeout(() => { el.classList.remove('pop'); el._t = 0; }, 600);
++  });
++  // bosh sahifa / kartalar uchun: ustiga kelganda emoji almashish
++  document.querySelectorAll('[data-hover-emoji]').forEach(c => {
++    const t = c.querySelector('.emo'); if (!t) return; const orig = t.textContent, alt = c.dataset.hoverEmoji;
++    c.addEventListener('pointerenter', () => t.textContent = alt);
++    c.addEventListener('pointerleave', () => t.textContent = orig);
++  });
++})();
++</script>
++{% block scripts %}{% endblock %}
++</body></html>
+diff --git a/timetable/templates/group_schedule.html b/timetable/templates/group_schedule.html
+index 0a7c1fe..f66aff9 100644
+--- a/timetable/templates/group_schedule.html
++++ b/timetable/templates/group_schedule.html
+@@ -1,120 +1,64 @@
+ {% extends 'base.html' %}
+-
++{% load tt_extras %}
++{% block title %}{{ group_name }} — Dars jadvali{% endblock %}
+ {% block content %}
+-<div class="max-w-7xl mx-auto">
+-    <!-- Header -->
+-    <div class="mb-8 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+-        <a href="{% url 'home' %}" 
+-           class="inline-flex items-center gap-2 px-4 py-2 bg-white/10 text-white rounded-xl hover:bg-white/20 transition-all duration-300 backdrop-blur-sm">
+-            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path>
+-            </svg>
+-            <span>Orqaga</span>
+-        </a>
+-        
+-        <div class="flex gap-3">
+-            <a href="{% url 'group_schedule' group_name %}?format=csv" 
+-               class="inline-flex items-center gap-2 px-5 py-3 bg-gradient-to-r from-green-500 to-emerald-600 text-white rounded-xl font-semibold hover:from-green-600 hover:to-emerald-700 transition-all duration-300 transform hover:scale-105 shadow-lg">
+-                <span class="text-xl animate-pulse-slow">📄</span>
+-                <span>CSV</span>
+-            </a>
+-            <a href="{% url 'group_schedule' group_name %}?format=pdf" 
+-               class="inline-flex items-center gap-2 px-5 py-3 bg-gradient-to-r from-red-500 to-pink-600 text-white rounded-xl font-semibold hover:from-red-600 hover:to-pink-700 transition-all duration-300 transform hover:scale-105 shadow-lg">
+-                <span class="text-xl animate-pulse-slow">📄</span>
+-                <span>PDF</span>
+-            </a>
+-        </div>
+-    </div>
+-    
+-    <!-- Title Card -->
+-    <div class="glass-effect rounded-3xl shadow-2xl overflow-hidden mb-8 card-hover neon-border">
+-        <div class="bg-gradient-to-r from-blue-600 to-indigo-600 px-8 py-8 relative overflow-hidden">
+-            <div class="absolute inset-0 shimmer"></div>
+-            <div class="relative z-10 flex items-center gap-4">
+-                <div class="text-5xl animate-float">📖</div>
+-                <div>
+-                    <h1 class="text-4xl font-bold text-white mb-2 text-shadow">{{ group_name }} Guruh Jadvali</h1>
+-                    <p class="text-blue-100 text-lg">Haftalik dars jadvali</p>
+-                </div>
+-            </div>
+-        </div>
++<div class="flex flex-wrap justify-between gap-3 mb-6">
++  <a href="{% url 'home' %}" class="px-4 py-2 rounded-xl bg-white/10 text-white hover:bg-white/20"><span class="emo">⬅️</span> Orqaga</a>
++  <div class="flex gap-2">
++    <a href="?format=csv" class="px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-white font-semibold"><span class="emo">📊</span> CSV</a>
++    <a href="?format=pdf" class="px-4 py-2 rounded-xl bg-rose-500 hover:bg-rose-600 text-white font-semibold"><span class="emo">📄</span> PDF</a>
++  </div>
++</div>
++
++<div class="glass rounded-3xl overflow-hidden mb-8 rise">
++  <div class="bg-gradient-to-r from-indigo-600 to-violet-600 p-7 flex items-center gap-4 text-white">
++    <span class="emo idle text-5xl">🎒</span>
++    <div><h1 class="text-3xl font-extrabold">{{ group_name }}</h1>
++      <p class="text-indigo-100">Haftalik jadval · <span id="today-label"></span></p></div>
++    <div class="ml-auto hidden sm:flex gap-2 text-sm">
++      <span class="px-3 py-1 rounded-full bg-white/15"><span class="emo">🎤</span> Ma'ruza</span>
++      <span class="px-3 py-1 rounded-full bg-white/15"><span class="emo">✍️</span> Seminar</span>
+     </div>
+-    
+-    <!-- Schedule Cards -->
+-    <div class="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
+-        {% for day_schedule in schedule_data %}
+-        <div class="glass-effect rounded-2xl shadow-xl overflow-hidden card-hover neon-border {% if day_schedule.day_num == today %}ring-4 ring-blue-400 ring-opacity-50 glow-effect{% endif %}">
+-            <!-- Day Header -->
+-            <div class="bg-gradient-to-r {% if day_schedule.day_num == today %}from-blue-600 to-indigo-600{% else %}from-gray-700 to-gray-800{% endif %} px-6 py-4">
+-                <div class="flex items-center justify-between">
+-                    <div class="flex items-center gap-3">
+-                        <span class="text-3xl animate-float inline-block">
+-                            {% if day_schedule.day_num == today %}📅{% else %}📆{% endif %}
+-                        </span>
+-                        <h2 class="text-2xl font-bold text-white">{{ day_schedule.day_name }}</h2>
+-                    </div>
+-                    {% if day_schedule.day_num == today %}
+-                    <span class="px-3 py-1 bg-white text-blue-600 rounded-full text-sm font-bold animate-pulse-slow">Bugun</span>
+-                    {% endif %}
+-                </div>
+-            </div>
+-            
+-            <!-- Slots -->
+-            <div class="p-6 space-y-4">
+-                {% for slot in day_schedule.slots %}
+-                <div class="bg-white rounded-xl p-4 border-l-4 {% if slot.lesson_type == 'lecture' %}border-blue-500{% else %}border-indigo-500{% endif %} hover:shadow-lg transition-all duration-300 transform hover:translate-x-1 relative overflow-hidden">
+-                    <div class="absolute inset-0 shimmer opacity-50"></div>
+-                    <div class="relative z-10">
+-                        <div class="flex items-center justify-between mb-3">
+-                            <span class="text-2xl font-bold {% if slot.lesson_type == 'lecture' %}text-blue-600{% else %}text-indigo-600{% endif %}">{{ slot.pair_number }}-para</span>
+-                            <span class="px-3 py-1 rounded-full text-sm font-semibold {% if slot.lesson_type == 'lecture' %}bg-blue-100 text-blue-700{% else %}bg-indigo-100 text-indigo-700{% endif %}">
+-                                {% if slot.lesson_type == 'lecture' %}Ma'ruza{% else %}Seminar{% endif %}
+-                            </span>
+-                        </div>
+-                        
+-                        <div class="space-y-2">
+-                            <div class="flex items-center gap-2 text-gray-700">
+-                                <span class="text-lg animate-pulse-slow">📚</span>
+-                                <span class="font-semibold">{{ slot.subject.name }}</span>
+-                            </div>
+-                            <div class="flex items-center gap-2 text-gray-600">
+-                                <span>👨‍🏫</span>
+-                                <span class="text-sm">{{ slot.teacher.full_name }}</span>
+-                            </div>
+-                            <div class="flex items-center gap-2 text-gray-600">
+-                                <span>🚪</span>
+-                                <span class="text-sm">{{ slot.room.name }}</span>
+-                            </div>
+-                        </div>
+-                    </div>
+-                </div>
+-                {% endfor %}
+-                
+-                {% if not day_schedule.slots %}
+-                <div class="text-center py-8 text-gray-400">
+-                    <div class="text-4xl mb-2 animate-float">😴</div>
+-                    <p class="text-sm">Darslar yo'q</p>
+-                </div>
+-                {% endif %}
+-            </div>
+-        </div>
+-        {% endfor %}
++  </div>
++</div>
++
++<div class="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
++{% for day in schedule_data %}
++  <section class="glass rounded-2xl overflow-hidden rise {% if day.day_num == today %}ring-4 ring-emerald-400{% endif %}" style="animation-delay:{{ forloop.counter0 }}00ms">
++    <div class="px-5 py-3 flex items-center gap-2 text-white {% if day.day_num == today %}bg-emerald-600{% else %}bg-slate-700{% endif %}">
++      <span class="emo text-2xl">{% if day.day_num == today %}🌟{% else %}📆{% endif %}</span>
++      <h2 class="font-bold text-lg">{{ day.day_name }}</h2>
++      <span class="ml-auto text-sm opacity-80">{{ day.slots|length }} para</span>
++      {% if day.day_num == today %}<span class="px-2 py-0.5 rounded-full bg-white text-emerald-700 text-xs font-bold">Bugun</span>{% endif %}
+     </div>
+-    
+-    <!-- Footer -->
+-    <div class="mt-12 text-center">
+-        <div class="glass-effect rounded-2xl p-6 inline-block">
+-            <p class="text-blue-200 text-sm">© 2026 Smart Timetable. Barcha huquqlar himoyalangan.</p>
+-            <div class="mt-2 flex justify-center gap-4">
+-                <a href="https://t.me/darsmakerbot" target="_blank" class="text-blue-300 hover:text-white transition-colors text-sm flex items-center gap-1">
+-                    <span class="animate-pulse-slow">🤖</span> Telegram Bot
+-                </a>
+-                <span class="text-blue-400">•</span>
+-                <a href="/admin" class="text-blue-300 hover:text-white transition-colors text-sm flex items-center gap-1">
+-                    <span class="animate-spin-slow">⚙️</span> Admin Panel
+-                </a>
+-            </div>
++    <div class="p-4 space-y-3">
++    {% for s in day.slots %}
++      <article data-pair="{{ s.pair_number }}" data-day="{{ day.day_num }}" class="lesson lift rounded-xl bg-white p-4 border-l-4 {% if s.lesson_type == 'lecture' %}border-indigo-500{% else %}border-fuchsia-500{% endif %}">
++        <div class="flex items-center justify-between mb-2">
++          <span class="font-extrabold {% if s.lesson_type == 'lecture' %}text-indigo-600{% else %}text-fuchsia-600{% endif %}">{{ s.pair_number }}-para
++            <span class="text-xs font-semibold text-slate-400 ml-1"><span class="emo">⏰</span> {{ s.pair_number|pair_time }}</span></span>
++          <span class="text-xs px-2 py-1 rounded-full font-semibold {% if s.lesson_type == 'lecture' %}bg-indigo-100 text-indigo-700{% else %}bg-fuchsia-100 text-fuchsia-700{% endif %}">
++            <span class="emo">{% if s.lesson_type == 'lecture' %}🎤{% else %}✍️{% endif %}</span> {% if s.lesson_type == 'lecture' %}Ma'ruza{% else %}Seminar{% endif %}</span>
+         </div>
++        <div class="font-semibold flex gap-2"><span class="emo">{{ s.subject.name|subject_emoji }}</span>{{ s.subject.name }}</div>
++        <div class="text-sm text-slate-600 mt-1 flex gap-2"><span class="emo">🧑‍🏫</span>{{ s.teacher.full_name }}</div>
++        <div class="text-sm text-slate-600 flex gap-2"><span class="emo">🚪</span>{{ s.room.name }}</div>
++      </article>
++    {% endfor %}
+     </div>
++  </section>
++{% empty %}
++  <div class="col-span-full glass rounded-2xl p-12 text-center text-slate-500"><span class="emo idle text-6xl">😴</span><p class="mt-2">Bu guruh uchun darslar yo'q</p></div>
++{% endfor %}
+ </div>
+ {% endblock %}
++{% block scripts %}<script>
++// "Hozir" - joriy paraga pulsatsiya beradi (bugungi kun kartasida)
++const T = [[8,30,9,50],[10,0,11,20],[11,30,12,50],[14,0,15,20],[15,30,16,50]];
++const now = new Date(), m = now.getHours() * 60 + now.getMinutes(), dow = now.getDay() || 7;
++document.getElementById('today-label').textContent = now.toLocaleDateString('uz-UZ', {weekday: 'long', day: 'numeric', month: 'long'});
++T.forEach((t, i) => { if (m >= t[0] * 60 + t[1] && m <= t[2] * 60 + t[3])
++  document.querySelectorAll(`.lesson[data-day="${dow}"][data-pair="${i + 1}"]`).forEach(el => {
++    el.classList.add('now', 'ring-2', 'ring-emerald-400');
++    el.insertAdjacentHTML('afterbegin', '<div class="text-xs font-bold text-emerald-600 mb-1"><span class="emo">🟢</span> Hozir davom etmoqda</div>'); }); });
++</script>{% endblock %}
+diff --git a/timetable/templates/index.html b/timetable/templates/index.html
+index beec70d..cf59c42 100644
+--- a/timetable/templates/index.html
++++ b/timetable/templates/index.html
+@@ -1,133 +1,52 @@
+ {% extends 'base.html' %}
+-
+ {% block content %}
+-<div class="max-w-6xl mx-auto">
+-    <!-- Hero Section -->
+-    <div class="text-center mb-16 pt-8">
+-        <div class="inline-block mb-6">
+-            <span class="text-7xl animate-pulse-slow inline-block">📚</span>
+-        </div>
+-        <h1 class="text-6xl font-extrabold text-white mb-4 tracking-tight">
+-            <span class="gradient-text">Smart Timetable</span>
+-        </h1>
+-        <p class="text-xl text-blue-200 font-light">Universitetlar uchun aqlli dars jadvali</p>
+-        <div class="mt-6 flex justify-center gap-4">
+-            <span class="px-4 py-2 bg-white/10 rounded-full text-sm text-blue-200 backdrop-blur-sm">⚡ Tez</span>
+-            <span class="px-4 py-2 bg-white/10 rounded-full text-sm text-blue-200 backdrop-blur-sm">🎯 Aniq</span>
+-            <span class="px-4 py-2 bg-white/10 rounded-full text-sm text-blue-200 backdrop-blur-sm">📱 Mobil</span>
+-        </div>
+-    </div>
+-    
+-    <!-- Search Form -->
+-    <div class="glass-effect rounded-3xl shadow-2xl p-8 mb-8 card-hover neon-border">
+-        <div class="flex items-center gap-3 mb-6">
+-            <span class="text-3xl animate-spin-slow inline-block">🔍</span>
+-            <h2 class="text-2xl font-bold text-gray-800 text-shadow">Guruhni qidiring</h2>
+-        </div>
+-        <form action="{% url 'group_schedule' 'KI-210' %}" method="get" id="searchForm">
+-            <div class="flex gap-4">
+-                <div class="flex-1 relative">
+-                    <input 
+-                        type="text" 
+-                        id="groupInput" 
+-                        name="group_name"
+-                        placeholder="Guruh nomini kiriting (masalan: KI-210)" 
+-                        class="w-full px-6 py-4 bg-gray-50 border-2 border-gray-200 rounded-2xl focus:border-blue-500 focus:outline-none focus:ring-4 focus:ring-blue-500/20 text-lg transition-all duration-300"
+-                        required
+-                    >
+-                    <div class="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400">
+-                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
+-                        </svg>
+-                    </div>
+-                </div>
+-                <button 
+-                    type="submit" 
+-                    class="px-8 py-4 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-2xl font-bold hover:from-blue-700 hover:to-indigo-700 transition-all duration-300 transform hover:scale-105 shadow-lg flex items-center gap-2 glow-effect ripple"
+-                >
+-                    <span>Qidirish</span>
+-                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7l5 5m0 0l-5 5m5-5H6"></path>
+-                    </svg>
+-                </button>
+-            </div>
+-        </form>
+-    </div>
+-    
+-    <!-- Group Cards -->
+-    <div class="glass-effect rounded-3xl shadow-2xl p-8 card-hover neon-border">
+-        <div class="flex items-center gap-3 mb-8">
+-            <span class="text-3xl animate-float inline-block">👥</span>
+-            <h2 class="text-2xl font-bold text-gray-800 text-shadow">Guruhlar ro'yxati</h2>
+-            <span class="ml-auto px-4 py-2 bg-blue-100 text-blue-700 rounded-full text-sm font-semibold shimmer">
+-                {{ groups|length }} ta guruh
+-            </span>
+-        </div>
+-        
+-        {% if groups %}
+-        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+-            {% for group in groups %}
+-            <a href="{% url 'group_schedule' group %}" 
+-               class="block bg-gradient-to-br from-blue-600 to-indigo-600 text-white rounded-2xl p-6 hover:from-blue-700 hover:to-indigo-700 transition-all duration-300 transform hover:scale-105 shadow-xl card-hover group relative overflow-hidden">
+-                <div class="absolute inset-0 shimmer"></div>
+-                <div class="relative z-10 text-center">
+-                    <div class="text-4xl mb-3 group-hover:scale-110 transition-transform duration-300 animate-pulse-slow">📖</div>
+-                    <div class="text-xl font-bold text-shadow">{{ group }}</div>
+-                    <div class="mt-2 text-sm text-blue-100 opacity-0 group-hover:opacity-100 transition-opacity duration-300">
+-                        Jadvalni ko'rish →
+-                    </div>
+-                </div>
+-            </a>
+-            {% endfor %}
+-        </div>
+-        {% else %}
+-        <div class="text-center py-16">
+-            <div class="text-8xl mb-6 animate-float">📭</div>
+-            <p class="text-gray-500 text-xl font-medium">Hozircha guruhlar yo'q.</p>
+-            <p class="text-gray-400 text-sm mt-2">Admin panel orqali guruh qo'shing</p>
+-        </div>
+-        {% endif %}
+-    </div>
+-    
+-    <!-- Footer -->
+-    <div class="mt-12 text-center">
+-        <div class="glass-effect rounded-2xl p-6 inline-block neon-border">
+-            <p class="text-blue-200 text-sm text-shadow">© 2026 Smart Timetable. Barcha huquqlar himoyalangan.</p>
+-            <div class="mt-2 flex justify-center gap-4">
+-                <a href="https://t.me/darsmakerbot" target="_blank" class="text-blue-300 hover:text-white transition-colors text-sm flex items-center gap-1 glow-effect">
+-                    <span class="animate-pulse-slow">🤖</span> Telegram Bot
+-                </a>
+-                <span class="text-blue-400">•</span>
+-                <a href="/admin" class="text-blue-300 hover:text-white transition-colors text-sm flex items-center gap-1 glow-effect">
+-                    <span class="animate-spin-slow">⚙️</span> Admin Panel
+-                </a>
+-            </div>
+-        </div>
+-    </div>
+-</div>
+-
+-<script>
+-document.getElementById('searchForm').addEventListener('submit', function(e) {
+-    e.preventDefault();
+-    const groupName = document.getElementById('groupInput').value.trim();
+-    if (groupName) {
+-        window.location.href = '/schedule/' + groupName + '/';
+-    }
+-});
++<header class="text-center pt-6 mb-10 text-white rise">
++  <div class="text-7xl mb-3"><span class="emo idle">🎓</span><span class="emo idle" style="animation-delay:.4s">📅</span><span class="emo idle" style="animation-delay:.8s">✨</span></div>
++  <h1 class="text-5xl md:text-6xl font-extrabold tracking-tight">Smart Timetable</h1>
++  <p class="text-indigo-200 mt-3 text-lg">Universitetlar uchun aqlli dars jadvali</p>
++  <div class="mt-5 flex justify-center gap-3 text-sm">
++    <span class="px-4 py-2 rounded-full bg-white/10"><span class="emo">⚡</span> Tez</span>
++    <span class="px-4 py-2 rounded-full bg-white/10"><span class="emo">🎯</span> To'qnashuvsiz</span>
++    <span class="px-4 py-2 rounded-full bg-white/10"><span class="emo">📱</span> Mobil</span>
++  </div>
++</header>
+ 
+-// LocalStorage for last selected group
+-document.addEventListener('DOMContentLoaded', function() {
+-    const lastGroup = localStorage.getItem('lastSelectedGroup');
+-    if (lastGroup) {
+-        document.getElementById('groupInput').value = lastGroup;
+-    }
+-});
++<section class="glass rounded-3xl p-6 mb-8 rise">
++  <label for="groupInput" class="flex items-center gap-2 font-bold text-xl mb-4"><span class="emo">🔍</span> Guruhni qidiring</label>
++  <form id="searchForm" class="flex gap-3">
++    <input id="groupInput" list="groups" autocomplete="off" required placeholder="Masalan: KI-210"
++      class="flex-1 px-5 py-4 rounded-2xl bg-slate-50 border-2 border-slate-200 focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/20 outline-none text-lg">
++    <datalist id="groups">{% for g in groups %}<option value="{{ g }}">{% endfor %}</datalist>
++    <button class="px-7 rounded-2xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold">Ochish <span class="emo">🚀</span></button>
++  </form>
++</section>
+ 
+-document.querySelectorAll('a[href^="/schedule/"]').forEach(link => {
+-    link.addEventListener('click', function() {
+-        const groupName = this.getAttribute('href').split('/')[2];
+-        localStorage.setItem('lastSelectedGroup', groupName);
+-    });
+-});
+-</script>
++<section class="glass rounded-3xl p-6 rise">
++  <div class="flex items-center gap-2 mb-6"><span class="emo text-3xl">👥</span>
++    <h2 class="text-xl font-bold">Guruhlar</h2>
++    <span class="ml-auto px-3 py-1 rounded-full bg-indigo-100 text-indigo-700 text-sm font-semibold">{{ groups|length }} ta</span></div>
++  {% if groups %}
++  <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
++    {% for g in groups %}
++    <a href="{% url 'group_schedule' g %}" data-hover-emoji="🎉" data-group="{{ g }}"
++       class="lift block rounded-2xl p-5 text-center text-white bg-gradient-to-br from-indigo-600 to-violet-600">
++      <div class="text-4xl mb-2"><span class="emo">📖</span></div>
++      <div class="text-lg font-bold">{{ g }}</div>
++      <div class="text-xs text-indigo-100 mt-1">Jadvalni ko'rish →</div>
++    </a>{% endfor %}
++  </div>
++  {% else %}
++  <div class="text-center py-14 text-slate-400"><div class="text-7xl mb-3"><span class="emo idle">📭</span></div>
++    Hozircha guruhlar yo'q. Jadval yaratish: <code>python manage.py generate_schedule</code></div>
++  {% endif %}
++</section>
+ {% endblock %}
++{% block scripts %}<script>
++const last = localStorage.getItem('lastGroup'), input = document.getElementById('groupInput');
++if (last) { input.value = last; }
++document.getElementById('searchForm').addEventListener('submit', e => {
++  e.preventDefault(); const g = input.value.trim(); if (!g) return;
++  localStorage.setItem('lastGroup', g); location.href = '/' + encodeURIComponent(g) + '/';
++});
++document.querySelectorAll('[data-group]').forEach(a => a.addEventListener('click', () => localStorage.setItem('lastGroup', a.dataset.group)));
++</script>{% endblock %}
+diff --git a/timetable/templatetags/tt_extras.py b/timetable/templatetags/tt_extras.py
+new file mode 100644
+index 0000000..c009379
+--- /dev/null
++++ b/timetable/templatetags/tt_extras.py
+@@ -0,0 +1,24 @@
++from django import template
++
++register = template.Library()
++
++SUBJECT_EMOJI = [
++    (('matem', 'math'), '📐'), (('fizika', 'phys'), '⚛️'), (('ingliz', 'eng', 'til'), '🌍'),
++    (('dastur', 'prog'), '💻'), (('baza', 'database', 'db'), '🗄️'), (('algoritm', 'algo'), '🧠'),
++    (('kimyo', 'chem'), '🧪'), (('tarix', 'hist'), '🏛️'), (('iqtis', 'econ'), '📈'),
++]
++PAIR_TIMES = {1: '08:30–09:50', 2: '10:00–11:20', 3: '11:30–12:50', 4: '14:00–15:20', 5: '15:30–16:50'}
++
++
++@register.filter
++def subject_emoji(name):
++    n = (name or '').lower()
++    for keys, emo in SUBJECT_EMOJI:
++        if any(k in n for k in keys):
++            return emo
++    return '📚'
++
++
++@register.filter
++def pair_time(pair):
++    return PAIR_TIMES.get(pair, '')
+diff --git a/timetable/test_scheduler.py b/timetable/test_scheduler.py
+new file mode 100644
+index 0000000..f5c3854
+--- /dev/null
++++ b/timetable/test_scheduler.py
+@@ -0,0 +1,50 @@
++from collections import Counter
++from django.test import SimpleTestCase
++from timetable.scheduler import Lesson, TeacherInfo, Solver, solve, diagnose
++
++
++def problem(groups=6, subjects=4):
++    lessons, n = [], 0
++    for g in range(groups):
++        for s in range(subjects):
++            for kind, h in (('lecture', 2), ('seminar', 1)):
++                for _ in range(h):
++                    lessons.append(Lesson(n, g * 10 + s, s, s % 4 + 1, f'G{g}', kind)); n += 1
++    teachers = {t: TeacherInfo(cap=20, daily_max=4) for t in range(1, 5)}
++    return lessons, teachers, [(1, 30), (2, 30), (3, 40), (4, 25)]
++
++
++class SolverTests(SimpleTestCase):
++    def setUp(self):
++        self.L, self.T, self.R = problem()
++        self.s = solve(self.L, self.T, self.R, seed=3, restarts=3, iterations=3000)
++
++    def test_all_placed_no_clashes(self):
++        self.assertEqual(self.s.unplaced(), [])
++        for key in (lambda l, a: (l.teacher, a[0], a[1]), lambda l, a: (l.group, a[0], a[1]),
++                    lambda l, a: (a[2], a[0], a[1])):
++            c = Counter(key(self.s.lessons[i], a) for i, a in self.s.assign.items())
++            self.assertTrue(all(v == 1 for v in c.values()))
++
++    def test_lecture_before_seminar(self):
++        for plan, ls in self.s.by_plan.items():
++            lec = min(self.s.assign[l.id][:2] for l in ls if l.kind == 'lecture')
++            sem = min(self.s.assign[l.id][:2] for l in ls if l.kind == 'seminar')
++            self.assertLess(lec, sem)
++
++    def test_limits_respected(self):
++        for t, info in self.T.items():
++            mine = [a for i, a in self.s.assign.items() if self.s.lessons[i].teacher == t]
++            self.assertLessEqual(len(mine), info.cap)
++            for d, n in Counter(a[0] for a in mine).items():
++                self.assertLessEqual(n, info.daily_max)
++
++    def test_deterministic_with_seed(self):
++        a = solve(self.L, self.T, self.R, seed=5, restarts=1, iterations=500).assign
++        b = solve(self.L, self.T, self.R, seed=5, restarts=1, iterations=500).assign
++        self.assertEqual(a, b)
++
++    def test_diagnose_flags_overload(self):
++        t = {1: TeacherInfo(cap=2, daily_max=4)}
++        L = [Lesson(i, 1, 1, 1, 'G', 'lecture') for i in range(5)]
++        self.assertTrue(any(k == 'teacher' for k, *_ in diagnose(L, t, 3)))

@@ -1,141 +1,161 @@
-from django.core.management.base import BaseCommand
-from timetable.models import Teacher, TimetableSlot, CoursePlan, Room
 from collections import defaultdict
+
+from django.core.management.base import BaseCommand
+from django.db import transaction
+
+from timetable.management.commands.generate_schedule import build_problem, DAY_NAMES
+from timetable.models import TimetableSlot
+from timetable.scheduler import Solver, DAYS, PAIRS
 
 
 class Command(BaseCommand):
-    help = 'Analyze schedule and provide optimization suggestions for superadmin'
+    help = "Jadvalni tekshirish (majburiy qoidalar), sifatini baholash va tasdiqlangan optimallashtirish takliflari"
 
-    def handle(self, *args, **options):
-        self.stdout.write('📊 Jadval tahlili va optimizatsiya maslahatlari...\n')
-        
-        # 1. O'qituvchilarning kunlik darslarini tahlil qilish
-        self.stdout.write('=== 1. O\'QITUVCHILARNING KUNLIK DARSLARI ===')
-        teacher_daily_stats = defaultdict(lambda: defaultdict(int))
-        
-        for slot in TimetableSlot.objects.select_related('teacher'):
-            teacher_daily_stats[slot.teacher][slot.day_of_week] += 1
-        
-        for teacher, days in teacher_daily_stats.items():
-            for day, count in days.items():
-                day_names = {1: 'Dushanba', 2: 'Seshanba', 3: 'Chorshanba', 4: 'Payshanba', 5: 'Juma', 6: 'Shanba'}
-                if count > 3:
-                    self.stdout.write(
-                        self.style.WARNING(
-                            f"⚠️ {teacher.full_name}: {day_names[day]} - {count} para (maksimal 3 tavsiya etiladi)"
-                        )
-                    )
-                elif count < 2 and count > 0:
-                    self.stdout.write(
-                        f"✅ {teacher.full_name}: {day_names[day]} - {count} para (yaxshi)"
-                    )
-        
-        # 2. Xonalarning bandlik darajasini tahlil qilish
-        self.stdout.write('\n=== 2. XONALARNING BANDLIGI ===')
-        room_usage = defaultdict(lambda: defaultdict(int))
-        
-        for slot in TimetableSlot.objects.select_related('room'):
-            room_usage[slot.room][slot.day_of_week] += 1
-        
-        for room, days in room_usage.items():
-            total_usage = sum(days.values())
-            capacity = room.capacity
-            usage_percent = (total_usage / (capacity * 5)) * 100  # 5 para per day, 6 days
-            
-            if usage_percent > 80:
-                self.stdout.write(
-                    self.style.WARNING(
-                        f"⚠️ {room.name}: {total_usage}/{capacity*5} ({usage_percent:.1f}% band) - ko'p ishlatilmoqda"
-                    )
-                )
-            elif usage_percent < 30:
-                self.stdout.write(
-                    f"✅ {room.name}: {total_usage}/{capacity*5} ({usage_percent:.1f}% band) - bo'sh ko'p"
-                )
-        
-        # 3. Guruhlarning darslarini tahlil qilish
-        self.stdout.write('\n=== 3. GURUHLARNING DARLARI ===')
-        group_stats = defaultdict(lambda: defaultdict(int))
-        
-        for slot in TimetableSlot.objects.all():
-            group_stats[slot.group_name][slot.day_of_week] += 1
-        
-        for group, days in group_stats.items():
-            for day, count in days.items():
-                day_names = {1: 'Dushanba', 2: 'Seshanba', 3: 'Chorshanba', 4: 'Payshanba', 5: 'Juma', 6: 'Shanba'}
-                if count > 4:
-                    self.stdout.write(
-                        self.style.WARNING(
-                            f"⚠️ {group}: {day_names[day]} - {count} para (juda ko'p)"
-                        )
-                    )
-                elif count == 0:
-                    self.stdout.write(
-                        f"ℹ️ {group}: {day_names[day]} - {count} para (dars yo'q)"
-                    )
-        
-        # 4. Optimizatsiya maslahatlari
-        self.stdout.write('\n=== 4. OPTIMIZATSIYA MASLAHATLARI ===')
-        
-        # 4.1 O'qituvchilarni boshqa kunga ko'chirish maslahati
-        suggestions = []
-        
-        for teacher, days in teacher_daily_stats.items():
-            overloaded_days = [day for day, count in days.items() if count > 3]
-            underloaded_days = [day for day, count in days.items() if count < 2 and count > 0]
-            
-            if overloaded_days and underloaded_days:
-                day_names = {1: 'Dushanba', 2: 'Seshanba', 3: 'Chorshanba', 4: 'Payshanba', 5: 'Juma', 6: 'Shanba'}
-                for over_day in overloaded_days:
-                    for under_day in underloaded_days:
-                        benefit = (days[over_day] - 3) * 10  # Har bir ortiqcha para uchun 10 ball
-                        suggestions.append({
-                            'type': 'teacher_move',
-                            'teacher': teacher.full_name,
-                            'from_day': day_names[over_day],
-                            'to_day': day_names[under_day],
-                            'benefit': benefit,
-                            'description': f"{teacher.full_name}ni {day_names[over_day]}dan {day_names[under_day]}ga ko'chirish ({days[over_day]} → {days[under_day] + 1})"
-                        })
-        
-        # 4.2 Guruhlarni boshqa kunga ko'chirish maslahati
-        for group, days in group_stats.items():
-            overloaded_days = [day for day, count in days.items() if count > 4]
-            underloaded_days = [day for day, count in days.items() if count < 2 and count > 0]
-            
-            if overloaded_days and underloaded_days:
-                day_names = {1: 'Dushanba', 2: 'Seshanba', 3: 'Chorshanba', 4: 'Payshanba', 5: 'Juma', 6: 'Shanba'}
-                for over_day in overloaded_days:
-                    for under_day in underloaded_days:
-                        benefit = (days[over_day] - 4) * 15  # Har bir ortiqcha para uchun 15 ball
-                        suggestions.append({
-                            'type': 'group_move',
-                            'group': group,
-                            'from_day': day_names[over_day],
-                            'to_day': day_names[under_day],
-                            'benefit': benefit,
-                            'description': f"{group} guruhini {day_names[over_day]}dan {day_names[under_day]}ga ko'chirish ({days[over_day]} → {days[under_day] + 1})"
-                        })
-        
-        # Maslahatlarni foyda bo'yicha tartiblash
-        suggestions.sort(key=lambda x: x['benefit'], reverse=True)
-        
-        if suggestions:
-            self.stdout.write('\n🎯 TOP 10 MASLAHATLAR (foyda bo\'yicha):')
-            for i, suggestion in enumerate(suggestions[:10], 1):
-                self.stdout.write(
-                    f"{i}. {suggestion['description']} (Foyda: {suggestion['benefit']} ball)"
-                )
-        else:
-            self.stdout.write('✅ Jadval optimal holatda!')
-        
-        # 5. Xulosa
-        self.stdout.write('\n=== 5. XULOSA ===')
-        self.stdout.write('📋 Umumiy tavsiyalar:')
-        self.stdout.write('1. O\'qituvchilar kuniga maksimal 3 para dars bo\'lishi kerak')
-        self.stdout.write('2. Guruhlar kuniga maksimal 4-5 para dars bo\'lishi kerak')
-        self.stdout.write('3. Juma tushdan keyin dars qo\'yish tavsiya etiladi')
-        self.stdout.write('4. Ma\'ruzalarni ertalab (1-3 para), seminarlarni tushdan keyin (4-5 para)')
-        self.stdout.write('5. Xonalar sig\'imidan to\'li foydalanish kerak')
-        
-        self.stdout.write(self.style.SUCCESS('\n✅ Tahlil tugadi!'))
+    def add_arguments(self, parser):
+        parser.add_argument('--apply', action='store_true', help="Topilgan yaxshilanishlarni qo'llash")
+        parser.add_argument('--top', type=int, default=10)
+
+    def handle(self, *args, **o):
+        lessons, teachers, rooms = build_problem()
+        slots = list(TimetableSlot.objects.select_related('subject', 'teacher', 'room'))
+        if not slots:
+            return self.stdout.write(self.style.WARNING("Jadval bo'sh. Avval generate_schedule ni ishga tushiring."))
+
+        # DB slotlarini solver holatiga moslashtirish (plan + tur bo'yicha)
+        pool = defaultdict(list)
+        for l in lessons:
+            pool[(l.group, l.subject, l.teacher, l.kind)].append(l)
+        s = Solver(lessons, teachers, rooms)
+        db_id, extra = {}, []
+        for sl in slots:
+            bucket = pool[(sl.group_name, sl.subject_id, sl.teacher_id, sl.lesson_type)]
+            if bucket:
+                l = bucket.pop()
+                s.place(l, sl.day_of_week, sl.pair_number, sl.room_id)
+                db_id[l.id] = sl.id
+            else:
+                extra.append(sl)
+
+        # 1. MAJBURIY QOIDALAR
+        self.stdout.write(self.style.MIGRATE_HEADING('=== 1. MAJBURIY QOIDALAR ==='))
+        errors = 0
+        for l in s.unplaced():
+            errors += 1
+            self.stdout.write(self.style.ERROR(f'❌ Rejadagi dars joylashmagan: {l.group}, fan#{l.subject}, {l.kind}'))
+        for sl in extra:
+            errors += 1
+            self.stdout.write(self.style.ERROR(f'❌ Rejada yo\'q dars: {sl}'))
+        by_teacher = defaultdict(int)
+        for sl in slots:
+            by_teacher[sl.teacher] += 1
+        for t, n in by_teacher.items():
+            if n > teachers[t.id].cap:
+                errors += 1
+                self.stdout.write(self.style.ERROR(f'❌ {t.full_name}: {n} soat > stavka limiti {teachers[t.id].cap}'))
+        for l in s.lessons.values():
+            if l.id not in s.assign:
+                continue
+            d, p, room = s.assign[l.id]
+            s.unplace(l)
+            ok = s.hard_ok(l, d, p)
+            s.place(l, d, p, room)
+            if not ok:
+                errors += 1
+                self.stdout.write(self.style.ERROR(
+                    f'❌ Qoida buzilgan: {l.group} {DAY_NAMES[d]} {p}-para ({l.kind}) - kunlik limit/tanaffus/ma\'ruza tartibi'))
+        self.stdout.write(self.style.SUCCESS('✅ Barcha majburiy qoidalar bajarilgan') if not errors else f'Jami xatolar: {errors}')
+
+        # 2. SIFAT
+        self.stdout.write(self.style.MIGRATE_HEADING('\n=== 2. SIFAT KO\'RSATKICHLARI ==='))
+        g_windows = defaultdict(int)
+        for g, days in s.gb.items():
+            for d, ps in days.items():
+                if ps:
+                    g_windows[g] += (max(ps) - min(ps) + 1) - len(ps)
+        t_windows = defaultdict(int)
+        for t, days in s.tb.items():
+            for d, ps in days.items():
+                if ps:
+                    t_windows[t] += (max(ps) - min(ps) + 1) - len(ps)
+        for g, w in sorted(g_windows.items()):
+            if w:
+                self.stdout.write(f'⚠️  {g}: {w} ta "oyna" (darslar orasida bo\'sh para)')
+        for t, w in t_windows.items():
+            if w:
+                self.stdout.write(f'⚠️  {teachers_name(slots, t)}: {w} ta oyna')
+        for g, days in sorted(s.gb.items()):
+            for d, ps in days.items():
+                if len(ps) > 4:
+                    self.stdout.write(f'⚠️  {g}: {DAY_NAMES[d]} - {len(ps)} para (4 tadan ko\'p)')
+        if not any(g_windows.values()) and not any(t_windows.values()):
+            self.stdout.write('✅ Oynalar yo\'q')
+
+        self.stdout.write(self.style.MIGRATE_HEADING('\n=== 3. XONALAR BANDLIGI ==='))
+        total = len(DAYS) * len(PAIRS)
+        used = defaultdict(int)
+        for sl in slots:
+            used[sl.room.name] += 1
+        for name, n in sorted(used.items(), key=lambda x: -x[1]):
+            pct = 100 * n / total
+            mark = '⚠️ ' if pct > 80 else ('💤' if pct < 20 else '✅')
+            self.stdout.write(f'{mark} {name}: {n}/{total} ({pct:.0f}%)')
+
+        # 4. TASDIQLANGAN TAKLIFLAR: har biri haqiqatan mumkin va jarimani kamaytiradi
+        self.stdout.write(self.style.MIGRATE_HEADING('\n=== 4. TASDIQLANGAN YAXSHILANISHLAR ==='))
+        before_total = s.total_cost()
+        applied = []
+        for _ in range(200):
+            best = None
+            for lid in list(s.assign):
+                l = s.lessons[lid]
+                old = s.assign[lid]
+                base = s._local(l)
+                s.unplace(l)
+                for d, p, room in s.candidates(l):
+                    if (d, p) == old[:2]:
+                        continue
+                    s.place(l, d, p, room)
+                    gain = base - s._local(l)
+                    s.unplace(l)
+                    if gain > 0.01 and (best is None or gain > best[0]):
+                        best = (gain, l, old, (d, p, room))
+                s.place(l, *old)
+            if not best:
+                break
+            gain, l, old, new = best
+            s.unplace(l)
+            s.place(l, *new)
+            applied.append((gain, l, old, new))
+        if not applied:
+            self.stdout.write('✅ Jadval lokal optimal - yaxshilash topilmadi')
+        for i, (gain, l, old, new) in enumerate(applied[:o['top']], 1):
+            self.stdout.write(f'{i}. {l.group} ({l.kind}): {DAY_NAMES[old[0]]} {old[1]}-para → '
+                              f'{DAY_NAMES[new[0]]} {new[1]}-para   (+{gain:.1f} ball)')
+
+        after_total = s.total_cost()
+        score = max(0, 100 - after_total / max(1, len(slots)) * 4)
+        self.stdout.write(self.style.MIGRATE_HEADING('\n=== XULOSA ==='))
+        self.stdout.write(f'Jarima: {before_total:.1f} → {after_total:.1f} (takliflardan keyin)')
+        self.stdout.write(f'Sifat bahosi: {score:.0f}/100')
+
+        if applied and o['apply']:
+            with transaction.atomic():
+                # unique constraint'lar sababli avval band slotlarni vaqtincha bo'shatamiz
+                ids = {db_id[i]: s.assign[i] for i in s.assign if i in db_id}
+                objs = {x.pk: x for x in TimetableSlot.objects.filter(pk__in=ids)}
+                TimetableSlot.objects.filter(pk__in=ids).delete()
+                TimetableSlot.objects.bulk_create([
+                    TimetableSlot(group_name=objs[pk].group_name, subject_id=objs[pk].subject_id,
+                                  teacher_id=objs[pk].teacher_id, room_id=r, lesson_type=objs[pk].lesson_type,
+                                  day_of_week=d, pair_number=p)
+                    for pk, (d, p, r) in ids.items()])
+            self.stdout.write(self.style.SUCCESS('✅ Yaxshilanishlar qo\'llandi'))
+        elif applied:
+            self.stdout.write("💡 Qo'llash uchun: python manage.py analyze_schedule --apply")
+
+
+def teachers_name(slots, tid):
+    for sl in slots:
+        if sl.teacher_id == tid:
+            return sl.teacher.full_name
+    return str(tid)

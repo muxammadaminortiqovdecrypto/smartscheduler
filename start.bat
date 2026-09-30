@@ -22,14 +22,18 @@ if %errorlevel% neq 0 (
 echo Jadval generatsiyasi muvaffaqiyatli tugadi!
 echo.
 
-echo 3. Web server ishga tushmoqda...
-start "Django Web Server" cmd /c "python manage.py runserver && exit"
+echo 3. Web server ishga tushmoqda (port 8000)...
+start "Django Web Server" cmd /c "waitress-serve --port=8000 smartscheduler.wsgi:application && pause"
 echo.
 
 echo 4. Telegram bot ishga tushmoqda...
-python bot/main.py
-
+start "Telegram Bot" cmd /c "python bot/main.py && pause"
 echo.
-echo Bot to'xtatildi.
-echo Web server oynasini yopish uchun X tugmasini bosing.
+
+echo Barcha serverlar ishga tushdi!
+echo Web: http://localhost:8000
+echo Bot: @darsmakerbot
+echo.
+echo Serverlarni to'xtatish uchun oynalarni yoping.
+pause
 

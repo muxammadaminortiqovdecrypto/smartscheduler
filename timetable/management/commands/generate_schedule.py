@@ -84,6 +84,11 @@ class Command(BaseCommand):
         )
         group_busy_slots = set(group_slots)
         
+        # O'qituvchining har kundagi darslar sonini hisoblash
+        teacher_daily_lessons = {}
+        for day, pair in teacher_busy_slots:
+            teacher_daily_lessons[day] = teacher_daily_lessons.get(day, 0) + 1
+        
         # Barcha mumkin bo'lgan slotlarni yaratish (kun va para kombinatsiyalari)
         all_slots = []
         for day in range(1, 7):  # 1-6 kun
@@ -115,11 +120,16 @@ class Command(BaseCommand):
             if slot_key in group_busy_slots:
                 continue
             
-            # 3. O'qituvchining tanaffus qoidasiga rioya qilish
+            # 3. Kunlik darslar soni cheklovi (maksimal 3 para)
+            daily_lessons = teacher_daily_lessons.get(day, 0)
+            if daily_lessons >= 3:
+                continue
+            
+            # 4. O'qituvchining tanaffus qoidasiga rioya qilish
             if not self._check_rest_hours(teacher, day, pair, lesson_type):
                 continue
             
-            # 4. Seminar bo'lsa, ma'ruzadan keyin bo'lishi kerak
+            # 5. Seminar bo'lsa, ma'ruzadan keyin bo'lishi kerak
             if after_lecture:
                 if not self._check_seminar_after_lecture(teacher, subject, group_name, day, pair):
                     continue
@@ -143,6 +153,7 @@ class Command(BaseCommand):
             # Band slotlarni yangilash
             teacher_busy_slots.add(slot_key)
             group_busy_slots.add(slot_key)
+            teacher_daily_lessons[day] = daily_lessons + 1
             
             lessons_created += 1
             self.stdout.write(f'  {lesson_type}: {self._get_day_name(day)} - {pair}-para')

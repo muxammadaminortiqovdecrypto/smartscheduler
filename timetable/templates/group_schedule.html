@@ -2,63 +2,90 @@
 {% load tt_extras %}
 {% block title %}{{ group_name }} — Dars jadvali{% endblock %}
 {% block content %}
-<div class="flex flex-wrap justify-between gap-3 mb-6">
-  <a href="{% url 'home' %}" class="px-4 py-2 rounded-xl bg-white/10 text-white hover:bg-white/20"><span class="emo">⬅️</span> Orqaga</a>
+<div class="flex flex-wrap justify-between items-center gap-3 mb-6">
+  <a href="{% url 'home' %}" class="px-4 py-2 rounded-xl bg-white/10 text-white hover:bg-white/20 backdrop-blur-sm border border-white/10">
+    <span class="emo">⬅️</span> Orqaga
+  </a>
   <div class="flex gap-2">
-    <a href="?format=csv" class="px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-white font-semibold"><span class="emo">📊</span> CSV</a>
-    <a href="?format=pdf" class="px-4 py-2 rounded-xl bg-rose-500 hover:bg-rose-600 text-white font-semibold"><span class="emo">📄</span> PDF</a>
+    <a href="?format=csv" class="px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-white font-semibold shadow-lg shadow-emerald-500/20"><span class="emo">📊</span> CSV</a>
+    <a href="?format=pdf" class="px-4 py-2 rounded-xl bg-rose-500 hover:bg-rose-600 text-white font-semibold shadow-lg shadow-rose-500/20"><span class="emo">📄</span> PDF</a>
   </div>
 </div>
 
-<div class="glass rounded-3xl overflow-hidden mb-8 rise">
-  <div class="bg-gradient-to-r from-indigo-600 to-violet-600 p-7 flex items-center gap-4 text-white">
-    <span class="emo idle text-5xl">🎒</span>
-    <div><h1 class="text-3xl font-extrabold">{{ group_name }}</h1>
-      <p class="text-indigo-100">Haftalik jadval · <span id="today-label"></span></p></div>
-    <div class="ml-auto hidden sm:flex gap-2 text-sm">
-      <span class="px-3 py-1 rounded-full bg-white/15"><span class="emo">🎤</span> Ma'ruza</span>
-      <span class="px-3 py-1 rounded-full bg-white/15"><span class="emo">✍️</span> Seminar</span>
+<div class="glass rounded-[30px] overflow-hidden mb-8 rise">
+  <div class="bg-gradient-to-r from-indigo-600 via-violet-600 to-fuchsia-600 p-6 md:p-8 flex flex-col md:flex-row md:items-center gap-4 text-white">
+    <div class="text-5xl"><span class="emo idle">🎒</span></div>
+    <div class="flex-1">
+      <h1 class="text-3xl md:text-4xl font-black tracking-tight">{{ group_name }}</h1>
+      <p class="mt-1 text-indigo-100">Haftalik jadval · <span id="today-label"></span></p>
+    </div>
+    <div class="flex flex-wrap gap-2 text-sm">
+      <span class="badge"><span class="emo">🎤</span> Ma'ruza</span>
+      <span class="badge"><span class="emo">✍️</span> Seminar</span>
     </div>
   </div>
 </div>
 
 <div class="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
 {% for day in schedule_data %}
-  <section class="glass rounded-2xl overflow-hidden rise {% if day.day_num == today %}ring-4 ring-emerald-400{% endif %}" style="animation-delay:{{ forloop.counter0 }}00ms">
+  <section class="glass rounded-3xl overflow-hidden rise {% if day.day_num == today %}ring-4 ring-emerald-300{% endif %}" style="animation-delay:{{ forloop.counter0 }}00ms">
     <div class="px-5 py-3 flex items-center gap-2 text-white {% if day.day_num == today %}bg-emerald-600{% else %}bg-slate-700{% endif %}">
       <span class="emo text-2xl">{% if day.day_num == today %}🌟{% else %}📆{% endif %}</span>
       <h2 class="font-bold text-lg">{{ day.day_name }}</h2>
       <span class="ml-auto text-sm opacity-80">{{ day.slots|length }} para</span>
       {% if day.day_num == today %}<span class="px-2 py-0.5 rounded-full bg-white text-emerald-700 text-xs font-bold">Bugun</span>{% endif %}
     </div>
+
     <div class="p-4 space-y-3">
     {% for s in day.slots %}
-      <article data-pair="{{ s.pair_number }}" data-day="{{ day.day_num }}" class="lesson lift rounded-xl bg-white p-4 border-l-4 {% if s.lesson_type == 'lecture' %}border-indigo-500{% else %}border-fuchsia-500{% endif %}">
-        <div class="flex items-center justify-between mb-2">
-          <span class="font-extrabold {% if s.lesson_type == 'lecture' %}text-indigo-600{% else %}text-fuchsia-600{% endif %}">{{ s.pair_number }}-para
-            <span class="text-xs font-semibold text-slate-400 ml-1"><span class="emo">⏰</span> {{ s.pair_number|pair_time }}</span></span>
-          <span class="text-xs px-2 py-1 rounded-full font-semibold {% if s.lesson_type == 'lecture' %}bg-indigo-100 text-indigo-700{% else %}bg-fuchsia-100 text-fuchsia-700{% endif %}">
-            <span class="emo">{% if s.lesson_type == 'lecture' %}🎤{% else %}✍️{% endif %}</span> {% if s.lesson_type == 'lecture' %}Ma'ruza{% else %}Seminar{% endif %}</span>
+      <article data-pair="{{ s.pair_number }}" data-day="{{ day.day_num }}" class="lesson lift rounded-2xl bg-white p-4 border border-slate-100 border-l-4 {% if s.lesson_type == 'lecture' %}border-l-indigo-500{% else %}border-l-fuchsia-500{% endif %}">
+        <div class="flex items-start justify-between gap-2 mb-3">
+          <div>
+            <div class="font-black text-lg {% if s.lesson_type == 'lecture' %}text-indigo-600{% else %}text-fuchsia-600{% endif %}">{{ s.pair_number }}-para</div>
+            <div class="text-xs text-slate-400 mt-1"><span class="emo">⏰</span> {{ s.pair_number|pair_time }}</div>
+          </div>
+          <span class="text-[11px] px-2 py-1 rounded-full font-bold {% if s.lesson_type == 'lecture' %}bg-indigo-100 text-indigo-700{% else %}bg-fuchsia-100 text-fuchsia-700{% endif %}">
+            <span class="emo">{% if s.lesson_type == 'lecture' %}🎤{% else %}✍️{% endif %}</span> {% if s.lesson_type == 'lecture' %}Ma'ruza{% else %}Seminar{% endif %}
+          </span>
         </div>
-        <div class="font-semibold flex gap-2"><span class="emo">{{ s.subject.name|subject_emoji }}</span>{{ s.subject.name }}</div>
-        <div class="text-sm text-slate-600 mt-1 flex gap-2"><span class="emo">🧑‍🏫</span>{{ s.teacher.full_name }}</div>
-        <div class="text-sm text-slate-600 flex gap-2"><span class="emo">🚪</span>{{ s.room.name }}</div>
+
+        <div class="font-bold text-slate-800 flex items-center gap-2 mb-2">
+          <span class="emo">{{ s.subject.name|subject_emoji }}</span>
+          <span>{{ s.subject.name }}</span>
+        </div>
+        <div class="text-sm text-slate-600 flex items-center gap-2 mb-1"><span class="emo">🧑‍🏫</span>{{ s.teacher.full_name }}</div>
+        <div class="text-sm text-slate-600 flex items-center gap-2"><span class="emo">🚪</span>{{ s.room.name }}</div>
       </article>
     {% endfor %}
     </div>
   </section>
 {% empty %}
-  <div class="col-span-full glass rounded-2xl p-12 text-center text-slate-500"><span class="emo idle text-6xl">😴</span><p class="mt-2">Bu guruh uchun darslar yo'q</p></div>
+  <div class="col-span-full glass rounded-3xl p-12 text-center text-slate-500">
+    <div class="text-7xl mb-3"><span class="emo idle">😴</span></div>
+    <p class="text-lg font-medium">Bu guruh uchun darslar yo'q.</p>
+  </div>
 {% endfor %}
 </div>
 {% endblock %}
-{% block scripts %}<script>
-// "Hozir" - joriy paraga pulsatsiya beradi (bugungi kun kartasida)
+
+{% block scripts %}
+<script>
 const T = [[8,30,9,50],[10,0,11,20],[11,30,12,50],[14,0,15,20],[15,30,16,50]];
 const now = new Date(), m = now.getHours() * 60 + now.getMinutes(), dow = now.getDay() || 7;
-document.getElementById('today-label').textContent = now.toLocaleDateString('uz-UZ', {weekday: 'long', day: 'numeric', month: 'long'});
-T.forEach((t, i) => { if (m >= t[0] * 60 + t[1] && m <= t[2] * 60 + t[3])
-  document.querySelectorAll(`.lesson[data-day="${dow}"][data-pair="${i + 1}"]`).forEach(el => {
-    el.classList.add('now', 'ring-2', 'ring-emerald-400');
-    el.insertAdjacentHTML('afterbegin', '<div class="text-xs font-bold text-emerald-600 mb-1"><span class="emo">🟢</span> Hozir davom etmoqda</div>'); }); });
-</script>{% endblock %}
+const todayLabel = document.getElementById('today-label');
+if (todayLabel) {
+  todayLabel.textContent = now.toLocaleDateString('uz-UZ', {weekday: 'long', day: 'numeric', month: 'long'});
+}
+
+T.forEach((t, i) => {
+  const start = t[0] * 60 + t[1];
+  const end = t[2] * 60 + t[3];
+  if (m >= start && m <= end) {
+    document.querySelectorAll(`.lesson[data-day="${dow}"][data-pair="${i + 1}"]`).forEach(el => {
+      el.classList.add('now', 'ring-2', 'ring-emerald-400');
+      el.insertAdjacentHTML('afterend', '<div class="text-xs font-bold text-emerald-600 mt-2"><span class="emo">🟢</span> Hozir davom etmoqda</div>');
+    });
+  }
+});
+</script>
+{% endblock %}

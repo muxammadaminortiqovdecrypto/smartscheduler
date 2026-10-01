@@ -1,52 +1,82 @@
 {% extends 'base.html' %}
 {% block content %}
 <header class="text-center pt-6 mb-10 text-white rise">
-  <div class="text-7xl mb-3"><span class="emo idle">🎓</span><span class="emo idle" style="animation-delay:.4s">📅</span><span class="emo idle" style="animation-delay:.8s">✨</span></div>
-  <h1 class="text-5xl md:text-6xl font-extrabold tracking-tight">Smart Timetable</h1>
-  <p class="text-indigo-200 mt-3 text-lg">Universitetlar uchun aqlli dars jadvali</p>
-  <div class="mt-5 flex justify-center gap-3 text-sm">
-    <span class="px-4 py-2 rounded-full bg-white/10"><span class="emo">⚡</span> Tez</span>
-    <span class="px-4 py-2 rounded-full bg-white/10"><span class="emo">🎯</span> To'qnashuvsiz</span>
-    <span class="px-4 py-2 rounded-full bg-white/10"><span class="emo">📱</span> Mobil</span>
+  <div class="mb-5 flex justify-center gap-3 text-6xl md:text-7xl">
+    <span class="emo idle">🎓</span>
+    <span class="emo idle" style="animation-delay:.35s">📅</span>
+    <span class="emo idle" style="animation-delay:.7s">✨</span>
+  </div>
+  <h1 class="text-4xl md:text-6xl font-black tracking-tight">Smart Timetable</h1>
+  <p class="mt-4 text-indigo-100 text-lg md:text-xl">Universitetlar uchun aqlli dars jadvali</p>
+
+  <div class="mt-6 flex flex-wrap justify-center gap-3 text-sm">
+    <span class="badge"><span class="emo">⚡</span> Tezkor</span>
+    <span class="badge"><span class="emo">🎯</span> To'qnashuvsiz</span>
+    <span class="badge"><span class="emo">📱</span> Mobil mos</span>
   </div>
 </header>
 
-<section class="glass rounded-3xl p-6 mb-8 rise">
-  <label for="groupInput" class="flex items-center gap-2 font-bold text-xl mb-4"><span class="emo">🔍</span> Guruhni qidiring</label>
-  <form id="searchForm" class="flex gap-3">
+<section class="glass rounded-[28px] p-5 md:p-7 mb-8 rise">
+  <div class="flex items-center gap-3 mb-5">
+    <span class="emo text-3xl">🔍</span>
+    <h2 class="text-xl md:text-2xl font-bold text-slate-800">Guruhni qidiring</h2>
+  </div>
+
+  <form id="searchForm" class="flex flex-col md:flex-row gap-3">
     <input id="groupInput" list="groups" autocomplete="off" required placeholder="Masalan: KI-210"
-      class="flex-1 px-5 py-4 rounded-2xl bg-slate-50 border-2 border-slate-200 focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/20 outline-none text-lg">
+      class="flex-1 px-5 py-4 rounded-2xl bg-slate-50 border-2 border-slate-200 focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/20 outline-none text-lg text-slate-800">
     <datalist id="groups">{% for g in groups %}<option value="{{ g }}">{% endfor %}</datalist>
-    <button class="px-7 rounded-2xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold">Ochish <span class="emo">🚀</span></button>
+    <button type="submit" class="px-6 py-4 rounded-2xl bg-gradient-to-r from-indigo-600 to-violet-600 text-white font-bold shadow-lg shadow-indigo-500/25 hover:shadow-indigo-500/40 transition-all">
+      Ochish <span class="emo">🚀</span>
+    </button>
   </form>
 </section>
 
-<section class="glass rounded-3xl p-6 rise">
-  <div class="flex items-center gap-2 mb-6"><span class="emo text-3xl">👥</span>
-    <h2 class="text-xl font-bold">Guruhlar</h2>
-    <span class="ml-auto px-3 py-1 rounded-full bg-indigo-100 text-indigo-700 text-sm font-semibold">{{ groups|length }} ta</span></div>
+<section class="glass rounded-[28px] p-5 md:p-7 rise">
+  <div class="flex items-center justify-between gap-3 mb-6">
+    <div class="flex items-center gap-3">
+      <span class="emo text-3xl">👥</span>
+      <h2 class="text-xl md:text-2xl font-bold text-slate-800">Guruhlar</h2>
+    </div>
+    <span class="px-3 py-1.5 rounded-full bg-indigo-100 text-indigo-700 text-sm font-bold">{{ groups|length }} ta</span>
+  </div>
+
   {% if groups %}
-  <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+  <div class="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-4">
     {% for g in groups %}
     <a href="{% url 'group_schedule' g %}" data-hover-emoji="🎉" data-group="{{ g }}"
-       class="lift block rounded-2xl p-5 text-center text-white bg-gradient-to-br from-indigo-600 to-violet-600">
-      <div class="text-4xl mb-2"><span class="emo">📖</span></div>
-      <div class="text-lg font-bold">{{ g }}</div>
-      <div class="text-xs text-indigo-100 mt-1">Jadvalni ko'rish →</div>
-    </a>{% endfor %}
+       class="lift block rounded-2xl p-5 text-center text-white bg-gradient-to-br from-indigo-600 via-violet-600 to-fuchsia-600 border border-white/10">
+      <div class="text-4xl mb-3"><span class="emo">📚</span></div>
+      <div class="text-lg font-extrabold tracking-wide">{{ g }}</div>
+      <div class="mt-2 text-xs text-indigo-100">Jadvalni ko'rish →</div>
+    </a>
+    {% endfor %}
   </div>
   {% else %}
-  <div class="text-center py-14 text-slate-400"><div class="text-7xl mb-3"><span class="emo idle">📭</span></div>
-    Hozircha guruhlar yo'q. Jadval yaratish: <code>python manage.py generate_schedule</code></div>
+  <div class="text-center py-16 text-slate-500">
+    <div class="text-7xl mb-3"><span class="emo idle">📭</span></div>
+    <p class="text-lg font-medium">Hozircha guruhlar yo'q.</p>
+    <p class="mt-2 text-sm">Jadvalni yaratish uchun: <span class="font-semibold text-slate-700">python manage.py generate_schedule</span></p>
+  </div>
   {% endif %}
 </section>
 {% endblock %}
-{% block scripts %}<script>
+
+{% block scripts %}
+<script>
 const last = localStorage.getItem('lastGroup'), input = document.getElementById('groupInput');
-if (last) { input.value = last; }
+if (last) input.value = last;
+
 document.getElementById('searchForm').addEventListener('submit', e => {
-  e.preventDefault(); const g = input.value.trim(); if (!g) return;
-  localStorage.setItem('lastGroup', g); location.href = '/' + encodeURIComponent(g) + '/';
+  e.preventDefault();
+  const g = input.value.trim();
+  if (!g) return;
+  localStorage.setItem('lastGroup', g);
+  location.href = '/' + encodeURIComponent(g) + '/';
 });
-document.querySelectorAll('[data-group]').forEach(a => a.addEventListener('click', () => localStorage.setItem('lastGroup', a.dataset.group)));
-</script>{% endblock %}
+
+document.querySelectorAll('[data-group]').forEach(card => {
+  card.addEventListener('click', () => localStorage.setItem('lastGroup', card.dataset.group));
+});
+</script>
+{% endblock %}

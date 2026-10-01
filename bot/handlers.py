@@ -4,7 +4,18 @@ from aiogram.fsm.state import State, StatesGroup
 from asgiref.sync import sync_to_async
 from django.conf import settings
 from timetable.models import Teacher, TimetableSlot, Subject, Room, CoursePlan, SystemSettings
-from .keyboards import get_phone_keyboard, get_main_keyboard, get_remove_keyboard, get_admin_keyboard, get_degree_keyboard, get_role_keyboard
+from .keyboards import (
+    get_phone_keyboard,
+    get_main_keyboard,
+    get_remove_keyboard,
+    get_admin_keyboard,
+    get_teacher_keyboard,
+    get_superadmin_keyboard,
+    get_admin_inline_keyboard,
+    get_group_export_keyboard,
+    get_degree_keyboard,
+    get_role_keyboard,
+)
 import datetime
 
 
@@ -50,39 +61,52 @@ class StudentStates(StatesGroup):
 SUPERADMIN_ID = 1685342390
 
 
+async def get_teacher_by_telegram_id(user_id: int):
+    """Telegram ID bo'yicha o'qituvchini olish."""
+    teacher = await sync_to_async(Teacher.objects.filter)(telegram_id=user_id)
+    return await sync_to_async(teacher.first)()
+
+
+async def get_user_keyboard(user_id: int):
+    """Foydalanuvchi turiga qarab mos klaviatura qaytarish."""
+    if user_id == SUPERADMIN_ID:
+        return get_superadmin_keyboard()
+
+    teacher_obj = await get_teacher_by_telegram_id(user_id)
+    if teacher_obj and teacher_obj.is_superadmin:
+        return get_superadmin_keyboard()
+    if teacher_obj and teacher_obj.is_admin:
+        return get_admin_keyboard()
+    if teacher_obj:
+        return get_teacher_keyboard()
+    return get_role_keyboard()
+
+
 @router.message(F.text == '/start')
 async def cmd_start(message: types.Message, state: FSMContext):
     """Start komandasi - avtorizatsiyani boshlash"""
     await state.clear()
-    
+
     user_id = message.from_user.id
-    
-    # Superadmin tekshirish
+    teacher_obj = await get_teacher_by_telegram_id(user_id)
+
     if user_id == SUPERADMIN_ID:
-        teacher = await sync_to_async(Teacher.objects.filter)(telegram_id=user_id)
-        teacher_obj = await sync_to_async(teacher.first)()
-        
         if teacher_obj:
             await message.answer(
                 f"👑 Assalomu alaykum, Superadmin {message.from_user.first_name}!\n\n"
                 "Siz tizimga kirgansiz.",
-                reply_markup=get_admin_keyboard()
+                reply_markup=get_superadmin_keyboard()
             )
         else:
             await message.answer(
                 f"👑 Assalomu alaykum, Superadmin {message.from_user.first_name}!\n\n"
                 "Siz hali ro'yxatdan o'tmagansiz. Admin paneldan foydalanish uchun avval o'zingizni qo'shing.",
-                reply_markup=get_main_keyboard()
+                reply_markup=get_role_keyboard()
             )
         return
-    
-    # Foydalanuvchi allaqachon avtorizatsiyadan o'tganmi tekshirish
-    teacher = await sync_to_async(Teacher.objects.filter)(telegram_id=user_id)
-    teacher_exists = await sync_to_async(teacher.exists)()
-    
-    if teacher_exists:
-        teacher_obj = await sync_to_async(teacher.first)()
-        if teacher_obj.is_admin or teacher_obj.is_superadmin:
+
+    if teacher_obj:
+        if teacher_obj.is_superadmin or teacher_obj.is_admin:
             await message.answer(
                 f"👨‍🏫 Assalomu alaykum, Admin {message.from_user.first_name}!\n\n"
                 "Siz tizimga kirgansiz.",
@@ -92,15 +116,15 @@ async def cmd_start(message: types.Message, state: FSMContext):
             await message.answer(
                 f"Assalomu alaykum, {message.from_user.first_name}!\n\n"
                 "Siz allaqachon tizimga kirgansiz.",
-                reply_markup=get_main_keyboard()
+                reply_markup=get_teacher_keyboard()
             )
-    else:
-        # Talaba uchun guruh tanlash
-        await message.answer(
-            f"Assalomu alaykum, {message.from_user.first_name}!\n\n"
-            "Siz talabamisiz yoki o'qituvchimi?",
-            reply_markup=get_role_keyboard()
-        )
+        return
+
+    await message.answer(
+        f"Assalomu alaykum, {message.from_user.first_name}!\n\n"
+        "Siz talabamisiz yoki o'qituvchimi?",
+        reply_markup=get_role_keyboard()
+    )
 
 
 @router.message(F.text == "👨‍🎓 Talaba")
@@ -150,6 +174,7 @@ async def process_contact(message: types.Message, state: FSMContext):
     """Telefon raqamini qabul qilish va tekshirish"""
     contact = message.contact
     phone_number = contact.phone_number
+    user_id = message.from_user.id
     
     # Telefon raqamni tozalash (+998901234567 -> 998901234567)
     clean_phone = phone_number.replace('+', '').replace(' ', '').replace('-', '')
@@ -166,7 +191,7 @@ async def process_contact(message: types.Message, state: FSMContext):
         await message.answer(
             f"✅ Muvaffaqiyatli kirildi!\n\n"
             f"Xush kelibsiz, {teacher_obj.full_name}!",
-            reply_markup=get_main_keyboard()
+            reply_markup=await get_user_keyboard(user_id)
         )
         await state.clear()
     else:
@@ -354,51 +379,71 @@ async def cmd_weekly(message: types.Message, state: FSMContext):
 
 @router.message(F.text == "📥 Jadval yuklab olish")
 async def cmd_export(message: types.Message, state: FSMContext):
-    """Jadval yuklab olish (talaba yoki o'qituvchi)"""
+    """Jadvalni Telegramga to'g'ridan-to'g'ri fayl sifatida yuklab olish."""
     user_id = message.from_user.id
-    
-    # Avval o'qituvchi ekanligini tekshirish
-    teacher = await sync_to_async(Teacher.objects.filter)(telegram_id=user_id)
-    teacher_obj = await sync_to_async(teacher.first)()
-    
+    teacher_obj = await get_teacher_by_telegram_id(user_id)
+
     if teacher_obj:
-        # O'qituvchi rejimi - o'z jadvalini yuklab olish
-        # Web link yuborish (chunki PDF/CSV generatsiya web view orqali amalga oshiriladi)
-        await message.answer(
-            "📥 Jadval yuklab olish\n\n"
-            "Jadvalni yuklab olish uchun web saytdan foydalaning:\n"
-            "http://localhost:8000/schedule/all/\n\n"
-            "Yoki admin panel orqali export qiling.",
-            reply_markup=get_remove_keyboard()
-        )
-    else:
-        # Talaba rejimi - guruh tanlash
-        data = await state.get_data()
-        group_name = data.get('selected_group')
-        
-        if not group_name:
-            await message.answer(
-                "❌ Avval guruh tanlang. /start buyrug'ini bosing.",
-                reply_markup=get_remove_keyboard()
-            )
+        groups = await sync_to_async(
+            lambda: list(TimetableSlot.objects.filter(teacher=teacher_obj)
+                        .values_list('group_name', flat=True)
+                        .distinct())
+        )()
+        if not groups:
+            await message.answer("📥 Sizning mavjud jadvalingiz yo'q. Avval jadval yarating.")
             return
-        
-        # Guruh jadvalini yuklab olish uchun web link yuborish
         await message.answer(
-            f"📥 {group_name} guruh jadvalini yuklab olish\n\n"
-            f"CSV: http://localhost:8000/schedule/{group_name}/?format=csv\n"
-            f"PDF: http://localhost:8000/schedule/{group_name}/?format=pdf\n\n"
-            "Yoki admin panel orqali export qiling.",
+            "📥 Jadvalni yuklab olish uchun guruhni tanlang:",
+            reply_markup=get_group_export_keyboard(sorted(set(groups)))
+        )
+        return
+
+    data = await state.get_data()
+    group_name = data.get('selected_group')
+    if not group_name:
+        await message.answer(
+            "❌ Avval guruh tanlang. /start buyrug'ini bosing.",
             reply_markup=get_remove_keyboard()
         )
+        return
+
+    await message.answer(
+        f"📥 {group_name} guruh jadvalini yuklab olish",
+        reply_markup=get_group_export_keyboard([group_name])
+    )
 
 
 @router.message(F.text == "🔙 Orqaga")
 async def cmd_back(message: types.Message):
-    """Orqaga qaytish"""
+    """Orqaga qaytish: foydalanuvchi turi bo'yicha mos menyuga qaytish."""
+    user_id = message.from_user.id
+    keyboard = await get_user_keyboard(user_id)
+    if user_id == SUPERADMIN_ID:
+        await message.answer("🏠 Superadmin boshqaruv paneli", reply_markup=keyboard)
+        return
+
+    teacher_obj = await get_teacher_by_telegram_id(user_id)
+    if teacher_obj and (teacher_obj.is_admin or teacher_obj.is_superadmin):
+        await message.answer("🏠 Admin panel", reply_markup=keyboard)
+        return
+
+    if teacher_obj:
+        await message.answer("🏠 O'qituvchi paneli", reply_markup=keyboard)
+        return
+
+    await message.answer("🏠 Bosh menyu", reply_markup=keyboard)
+
+
+@router.message(F.text == "⚙️ Admin panel")
+async def cmd_admin_panel(message: types.Message):
+    """Admin panelni ochish."""
+    if not await check_admin(message):
+        await message.answer("❌ Sizda bu amalni bajarish uchun huquq yo'q.")
+        return
+
     await message.answer(
-        "🏠 Bosh menyu",
-        reply_markup=get_role_keyboard()
+        "⚙️ Admin panel",
+        reply_markup=get_admin_inline_keyboard()
     )
 
 

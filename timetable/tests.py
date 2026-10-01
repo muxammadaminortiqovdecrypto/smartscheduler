@@ -70,16 +70,19 @@ class TimetableQueryOptimizationTest(TestCase):
                 _ = slot.room.name
 
     def test_telegram_id_index_exists(self):
-        """telegram_id indeksi mavjudligini tekshirish"""
-        # Bu test indeks mavjudligini tekshiradi
-        # Django indekslar avtomatik qo'shiladi
+        """telegram_id uchun indeks/unique constraint mavjudligini tekshirish"""
         from django.db import connection
-        with connection.cursor() as cursor:
-            # SQLite uchun indeks tekshirish
-            cursor.execute("SELECT name FROM sqlite_master WHERE type='index' AND name LIKE '%telegram%'")
-            indexes = cursor.fetchall()
-            # Indeks bo'lishi shart emas (unique indeks avtomatik indeks hisoblanadi)
-            self.assertTrue(len(indexes) >= 0)
+
+        table_name = Teacher._meta.db_table
+        constraints = connection.introspection.get_constraints(connection.cursor(), table_name)
+        telegram_field = Teacher._meta.get_field('telegram_id').column
+
+        self.assertTrue(
+            any(
+                telegram_field in info.get('columns', [])
+                for info in constraints.values()
+            )
+        )
 
     def test_unique_constraints_enforced(self):
         """Unique constraintlar ishlashini tekshirish"""
